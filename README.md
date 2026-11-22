@@ -21,11 +21,8 @@ Hệ thống gồm giao diện chat cho khách hàng, trang quản trị cho nh�
 
 | Thành phần | Mô tả | Địa chỉ mặc định |
 |---|---|---|
-| Web chat | Giao diện khách hàng trò chuyện với chatbot | http://localhost:8000 |
-| Trang quản trị | Giao diện cho nhân viên | http://localhost:8000/admin/ |
-| Backend | FastAPI, xử lý nghiệp vụ, ghi DB, gọi Agent | http://localhost:8000/api |
-
-Nguyên tắc thiết kế: Agent chỉ **đề nghị** tạo Ticket hoặc Handoff (chuyển cho nhân viên). Backend tự kiểm tra điều kiện rồi mới ghi vào DB.
+| Web chat | Giao diện khách hàng trò chuyện với chatbot | https://resolveai-4ly7.onrender.com/ |
+| Trang quản trị | Giao diện cho nhân viên | https://resolveai-4ly7.onrender.com/admin/ |
 
 ## Cấu trúc thư mục
 
