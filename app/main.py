@@ -11,7 +11,6 @@ from pydantic import BaseModel
 from .agent_port import AgentPort
 from .config import Settings, load_settings
 from .db import Database
-from .policy_admin import make_router as make_policy_router
 from .service import ApiError, ChatService
 from .stub_agent import StubAgent
 
@@ -139,10 +138,6 @@ def create_app(settings: Settings | None = None, agent: AgentPort | None = None)
     @app.api_route("/api/admin/kb/docs/{doc_code}", methods=["PUT", "DELETE"])
     def kb_write(doc_code: str | None = None, _: dict = Depends(staff)):
         svc.kb_not_implemented()
-
-    # Giữ lại trang/API quản lý chính sách mà repo nhóm đã bổ sung.
-    # Router được khai báo trước static mounts để không bị giao diện che mất.
-    app.include_router(make_policy_router())
 
     # StaticFiles phục vụ thư mục khi URL có dấu / cuối. Hai redirect này giúp
     # các liên kết /admin và /chat không rơi nhầm vào trang bán hàng.
