@@ -2,3 +2,6 @@ fastapi>=0.115,<1.0
 uvicorn==0.34.0
 pydantic>=2.8,<3.0
 tzdata
+langgraph>=0.2,<2.0
+langfuse>=4,<5
+chromadb>=0.5,<2.0

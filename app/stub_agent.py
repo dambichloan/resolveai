@@ -9,6 +9,8 @@ import re
 import unicodedata
 
 from .agent_port import AgentInput, AgentOutput
+from .config import Settings
+from .mock_orders import MockOrderStore
 
 TICKET_TYPES_NEED_ORDER = {"Đổi trả", "Bảo hành"}
 FIELD_PROMPTS = {
@@ -75,6 +77,10 @@ def _fields_for(ticket_type: str) -> list[str]:
 
 
 class StubAgent:
+    def __init__(self, settings: Settings | None = None):
+        self.s = settings or Settings()
+        self.orders = MockOrderStore(self.s.mock_orders_db_path)
+
     def run_turn(self, inp: AgentInput) -> AgentOutput:
         state = dict(inp.state)
         t = norm(inp.text)
@@ -117,6 +123,10 @@ class StubAgent:
         if state.get("flow") == "ticket":
             return self._ticket_step(inp, state, t)
 
+        # ---- Tra cứu đơn: phải đi trước trigger đổi/trả để khách chỉ hỏi trạng thái không bị mở Ticket
+        if _has(t, ["don hang", "ma don", "tra don", "giao hang"]):
+            return self._order_step(state, t)
+
         # ---- Bắt đầu luồng tạo Ticket
         ttype = self._ticket_trigger(t)
         if ttype:
@@ -158,9 +168,7 @@ class StubAgent:
                                sources=[{"title": "Giờ làm việc và thời gian phản hồi của CSKH (KB-05)", "section": "Giờ làm việc"}],
                                intent="Tư vấn")
         if _has(t, ["don hang", "ma don", "tra don", "giao hang"]):
-            return AgentOutput("[Bản mẫu] Để tra cứu đơn hàng, bạn cần cung cấp mã đơn và 4 số cuối số điện "
-                               "thoại. Chức năng tra đơn do module MCP đảm nhiệm, chưa nối trong khung mẫu.",
-                               state, intent="Tư vấn")
+            return self._order_step(state, t)
         if _has(t, ["xin chao", "chao", "hello", "hi"]) and len(t) < 20:
             return AgentOutput("Xin chào, mình là trợ lý CSKH của Savani. Mình có thể giải đáp chính sách đổi "
                                "trả, bảo hành, và ghi nhận yêu cầu của bạn.", state, intent="Tư vấn")
@@ -174,6 +182,21 @@ class StubAgent:
                            intent=state.get("intent"), handoff_reason="HO-01")
 
     # ------------------------------------------------------------------ Size
+    def _order_step(self, state: dict, text: str) -> AgentOutput:
+        match = re.search(r"\bsvn\d{4}\b", text)
+        verifier = re.search(r"(?:so\s*cuoi|last\s*4)\D{0,20}(\d{4})", text)
+        email = re.search(r"[\w.+-]+@[\w.-]+\.[a-z]{2,}", text)
+        order = self.orders.lookup(match.group(0), verifier.group(1) if verifier else "",
+                                   email.group(0) if email else "") if match else None
+        if order:
+            return AgentOutput(
+                f"[Dữ liệu demo] Đơn {order['order_id']}: {order['status']}. "
+                f"{order['product']}. Cập nhật: {order['updated_at']}. {order['detail']}", state,
+                sources=[{"title": "Mock Order DB (MOCK-ORDER)", "section": "Dữ liệu giả chỉ dùng để trình diễn"}],
+                intent="Tư vấn")
+        return AgentOutput("Để tra đơn demo, bạn cho mình mã đơn và 4 số cuối số điện thoại hoặc email "
+                           "đăng ký. Ví dụ: SVN1001, 4 số cuối 1122.", state, intent="Tư vấn")
+
     @staticmethod
     def _size_step(state: dict, found: dict, intro: bool = False) -> AgentOutput:
         info = {**state.get("size", {}), **found}

@@ -8,8 +8,8 @@ header.site{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px s
 .logo{font-weight:800;letter-spacing:.32em;font-size:22px}
 .logo small{font-size:11px;letter-spacing:.18em;color:var(--brand);margin-left:6px;vertical-align:middle}
 header nav{flex:1;display:flex;gap:6px;flex-wrap:wrap}
-header nav button{border:0;border-bottom:2px solid transparent;background:none;border-radius:0;padding:6px 10px;font-size:15px}
-header nav button:hover{color:var(--brand)}
+header nav button,header nav a{border:0;border-bottom:2px solid transparent;background:none;border-radius:0;padding:6px 10px;font-size:15px}
+header nav button:hover,header nav a:hover{color:var(--brand)}
 header nav button.on{color:var(--brand);border-bottom-color:var(--brand);font-weight:600}
 .viewsite{font-size:14px;color:var(--mute)}.viewsite:hover{color:var(--brand)}
 .count{display:inline-block;background:var(--brand);color:#fff;border-radius:999px;font-size:11px;min-width:18px;height:18px;line-height:18px;text-align:center;padding:0 5px;margin-left:4px;font-weight:600}

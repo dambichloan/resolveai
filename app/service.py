@@ -23,6 +23,7 @@ from . import security
 from .agent_port import AgentInput, AgentOutput, AgentPort
 from .config import Settings
 from .db import Database
+from .guardrails import guard_output
 from . import kb
 from .hours import in_business_hours
 from .ratelimit import SlidingWindowLimiter
@@ -196,6 +197,8 @@ class ChatService:
         started = time.perf_counter()
         out, err = self._run_agent(inp)
         latency = int((time.perf_counter() - started) * 1000)
+        if out is not None:
+            out.reply = guard_output(out.reply)
 
         if err is not None:  # NFR-REC-01: hết lần thử, bảo toàn lịch sử và chuyển hàng đợi
             self._handoff(session_id, state.get("intent"), "HO-08", state,
