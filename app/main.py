@@ -154,6 +154,11 @@ def create_app(settings: Settings | None = None, agent: AgentPort | None = None)
     def chat_root():
         return RedirectResponse("/chat/")
 
+    @app.api_route("/api/admin/kb/docs", methods=["POST"])
+    @app.api_route("/api/admin/kb/docs/{doc_code}", methods=["PUT", "DELETE"])
+    def kb_write(doc_code: str | None = None, _: dict = Depends(staff)):
+        svc.kb_not_implemented()   
+    
     # ---------------- giao diện tĩnh (đặt sau cùng để không che /api)
     app.mount("/admin", StaticFiles(directory=WEB_DIR / "admin", html=True), name="admin")
     app.mount("/chat", StaticFiles(directory=WEB_DIR / "chat", html=True), name="chat")      # khung chat (iframe)
