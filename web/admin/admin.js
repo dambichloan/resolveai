@@ -7,7 +7,7 @@
   var NEXT = { "Mới": "Đang xử lý", "Đang xử lý": "Đã hoàn thành" };
   var STATUS = { AI_Handling: ["AI đang xử lý", "green"], Waiting_Agent: ["Chờ nhân viên", "red"], Agent_Handling: ["Nhân viên đang xử lý", "dark"], Closed: ["Đã đóng", ""] };
   var TSTATUS = { "Mới": "red", "Đang xử lý": "amber", "Đã hoàn thành": "green" };
-  var HO = { "HO-01": "Không đủ căn cứ trả lời", "HO-03": "Khách yêu cầu gặp nhân viên", "HO-04": "Khách bức xúc / khiếu nại", "HO-07": "Vượt phạm vi xử lý an toàn (xác thực đơn sai nhiều lần)", "HO-08": "Lỗi hệ thống Agent" };
+  var HO = { "HO-01": "Không đủ căn cứ trả lời", "HO-03": "Khách yêu cầu gặp nhân viên", "HO-04": "Khách bức xúc / khiếu nại", "HO-06": "Cần quyết định hoàn tiền / bồi thường / ngoại lệ", "HO-07": "Vượt phạm vi xử lý an toàn (xác thực đơn sai nhiều lần)", "HO-08": "Lỗi hệ thống Agent" };
   var HERO = {
     queue: ["Hàng đợi hỗ trợ", "Tiếp nhận các cuộc trò chuyện mà trợ lý AI đã chuyển cho nhân viên."],
     tickets: ["Ticket", "Yêu cầu đổi trả, bảo hành và khiếu nại đã được ghi nhận. Mã Ticket theo dạng TK-YYYYMMDDXXXX."],

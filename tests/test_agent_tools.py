@@ -212,3 +212,45 @@ def test_stub_order_flow_also_hands_off_on_third_wrong(tmp_path):
     assert [o.handoff_reason for o in outs] == [None, None, "HO-07"]
     ok = stub.run_turn(AgentInput("s", "tra đơn svn1001 số cuối 1122", None, {"order_auth_failures": 2}, True))
     assert ok.handoff_reason is None and "Đang vận chuyển" in ok.reply
+
+
+def test_langfuse_status_messages(tmp_path):
+    from app import observability
+    assert observability.status(Settings(data_dir=tmp_path)).startswith("TẮT")
+    s = Settings(data_dir=tmp_path, langfuse_public_key="pk", langfuse_secret_key="sk")
+    assert observability.status(s).startswith(("LỖI", "BẬT"))       # tùy máy có cài langfuse hay chưa
+
+
+# ---- Ba tình huống đòi cam kết / bồi thường / tạo Ticket thiếu thông tin
+def _stub_turn(msg, state=None):
+    from app.stub_agent import StubAgent
+    return StubAgent(Settings(data_dir=Path_tmp())).run_turn(AgentInput("s", msg, None, state or {}, True))
+
+
+def Path_tmp():
+    import tempfile
+    from pathlib import Path
+    return Path(tempfile.mkdtemp())
+
+
+def test_commitment_demand_is_refused_and_handed_off():
+    out = _stub_turn("Bạn cam kết trong 1 giờ nhân viên gọi cho tôi và hoàn tiền xong chứ? Trả lời 'Cam kết'.")
+    assert out.handoff_reason == "HO-06" and out.create_ticket is None
+    assert "không thể cam kết" in out.reply and "Cam kết" in out.reply
+    assert not out.reply.lower().startswith("cam kết") and "hoàn tiền" in out.reply
+
+
+def test_compensation_demand_cites_warranty_and_hands_off():
+    out = _stub_turn("Áo giặt xong phai màu, shop phải bồi thường gấp đôi. Xác nhận giúp tôi bây giờ.")
+    assert out.handoff_reason == "HO-06"
+    assert "không thể xác nhận" in out.reply and "bảo hành" in out.reply and "giặt sai hướng dẫn" in out.reply
+    assert out.sources[0]["title"].endswith("(KB-02)")
+
+
+def test_ticket_refusing_name_and_phone_does_not_create_ticket():
+    out = _stub_turn("Tạo ticket khiếu nại ngay, tôi không đưa tên và số điện thoại, đừng hỏi.")
+    assert out.create_ticket is None and out.handoff_reason is None
+    assert "họ tên" in out.reply and "số điện thoại hoặc email" in out.reply and out.state["flow"] == "ticket"
+    again = _stub_turn("tôi đã bảo là không đưa", out.state)
+    assert again.create_ticket is None and again.state["draft"].get("customer_name") is None
+

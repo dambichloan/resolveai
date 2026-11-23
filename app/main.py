@@ -1,6 +1,7 @@
 """FastAPI: lớp HTTP mỏng, mọi nghiệp vụ nằm ở app/service.py."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, Request
@@ -11,6 +12,7 @@ from pydantic import BaseModel
 from .agent_port import AgentPort
 from .config import Settings, load_settings
 from .db import Database
+from . import observability
 from .service import ApiError, ChatService
 from .stub_agent import StubAgent
 
@@ -54,6 +56,7 @@ def create_app(settings: Settings | None = None, agent: AgentPort | None = None)
     settings = settings or load_settings()
     db = Database(settings.app_db_path)
     db.init()
+    logging.getLogger("resolveai").warning("Langfuse: %s", observability.status(settings))
     svc = ChatService(db, settings, agent or build_agent(settings))
     svc.ensure_bootstrap_admin()
     if settings.seed_demo:

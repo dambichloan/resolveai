@@ -65,6 +65,11 @@ def recommend_size(gender: str, height: int, weight: int) -> tuple[str, str | No
     return _SIZES[idx], alt
 
 
+REFUSE_WORDS = ["khong dua", "khong cung cap", "khong cho biet", "khong noi", "dung hoi", "khoi hoi", "khong can hoi"]
+REQUIRED_NOTE = ("Mình chưa thể tạo Ticket nếu thiếu thông tin: cần họ tên, số điện thoại hoặc email và mô tả vấn đề, "
+                 "sau đó bạn xác nhận trên thẻ tóm tắt. ")
+
+
 def _has(t: str, words) -> bool:
     return any(w in t for w in words)
 
@@ -111,6 +116,30 @@ class StubAgent:
             return AgentOutput("Mình rất tiếc về trải nghiệm này của bạn. Mình chuyển ngay cho nhân viên "
                                "CSKH để hỗ trợ bạn.", state, intent="Khiếu nại", handoff_reason="HO-04")
 
+        # ---- BR3, BR6(6): đòi cam kết, bồi thường, hoàn tiền là quyết định của nhân viên; bot không hứa
+        if state.get("flow") != "ticket" and not _has(t, ["ticket", "tao yeu cau", "ghi nhan"]):
+            money = _has(t, ["hoan tien", "boi thuong", "den bu", "gap doi"])
+            if _has(t, ["cam ket", "bao dam", "hua "]) and (money or _has(t, ["goi cho toi", "nhan vien goi", "1 gio"])):
+                return AgentOutput(
+                    "Mình không thể cam kết hoàn tiền hay thời gian gọi lại ngoài khung phản hồi đã quy định, và "
+                    "mình không trả lời \"Cam kết\" thay nhân viên. Việc hoàn tiền do nhân viên CSKH quyết định sau "
+                    "khi kiểm tra, nên mình chuyển bạn cho nhân viên.", state,
+                    intent=state.get("intent") or "Đổi trả", handoff_reason="HO-06")
+            if _has(t, ["boi thuong", "den bu"]) or (money and _has(t, ["phai hoan", "yeu cau hoan", "muon hoan",
+                                                                         "hoan tien cho toi", "xac nhan"])):
+                if _has(t, ["phai mau", "giat", "bung", "rach", "hong", "loi", "bao hanh"]):
+                    return AgentOutput(
+                        "Mình không thể xác nhận hay hứa bồi thường. Theo chính sách bảo hành, Savani bảo hành 30 ngày "
+                        "kể từ ngày nhận hàng đối với lỗi kỹ thuật sản xuất, và từ chối bảo hành khi phai màu do giặt "
+                        "sai hướng dẫn trên nhãn hoặc quá 30 ngày. Việc bồi thường hoặc ngoại lệ chính sách do nhân "
+                        "viên CSKH quyết định, nên mình chuyển bạn cho nhân viên.", state,
+                        sources=[{"title": "Chính sách bảo hành (KB-02)", "section": "Thời hạn bảo hành"}],
+                        intent="Bảo hành", handoff_reason="HO-06")
+                return AgentOutput(
+                    "Mình không thể xác nhận hay hứa hoàn tiền, bồi thường hoặc ngoại lệ chính sách. Những việc này "
+                    "do nhân viên CSKH quyết định, nên mình chuyển bạn cho nhân viên.", state,
+                    intent=state.get("intent") or "Đổi trả", handoff_reason="HO-06")
+
         # ---- Đang tư vấn size: nếu câu mới không cung cấp thông tin nào thì thoát luồng, xử lý như bình thường
         if state.get("flow") == "size":
             found = parse_body(inp.text)
@@ -131,6 +160,8 @@ class StubAgent:
         ttype = self._ticket_trigger(t)
         if ttype:
             state.update(flow="ticket", draft={"type": ttype}, asking=None, awaiting_confirm=False)
+            if _has(t, REFUSE_WORDS):                     # khách không muốn đưa tên/SĐT: không tạo, nêu phần còn thiếu
+                return self._ask_next(state, REQUIRED_NOTE, ttype)
             return self._ask_next(state, "Mình sẽ ghi nhận yêu cầu " + ttype.lower() + " của bạn. ", ttype)
 
         # ---- Tư vấn size
@@ -250,6 +281,8 @@ class StubAgent:
             return AgentOutput(hint, state, ui=self._summary_ui(draft), intent=ttype)
         asking = state.get("asking")
         value = inp.text.strip()
+        if asking and _has(t, REFUSE_WORDS):              # không lưu câu từ chối làm giá trị trường
+            return AgentOutput(REQUIRED_NOTE + FIELD_PROMPTS[asking], state, intent=ttype)
         if asking == "contact" and not (re.search(r"\d{8,}", value) or "@" in value):
             return AgentOutput("Thông tin liên hệ chưa hợp lệ, bạn nhập số điện thoại hoặc email giúp mình nhé.",
                                state, intent=ttype)

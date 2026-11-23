@@ -16,7 +16,7 @@ from typing import Any, Callable
 MAX_TOOL_CALLS = 3
 TICKET_TYPES = ("Đổi trả", "Bảo hành", "Khiếu nại")
 NEED_ORDER = ("Đổi trả", "Bảo hành")
-HANDOFF_CODES = ("HO-01", "HO-03", "HO-04")   # mã mô hình được đề nghị; mã khác do Backend/luồng cố định quyết định
+HANDOFF_CODES = ("HO-01", "HO-03", "HO-04", "HO-06")   # mã mô hình được đề nghị; mã khác do Backend/luồng cố định quyết định
 
 TOOL_SPECS: list[dict[str, Any]] = [
     {"name": "search_kb",
@@ -37,7 +37,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
          "description": {"type": "string", "maxLength": 1000}},
          "required": ["type", "customer_name", "contact", "description"], "additionalProperties": False}},
     {"name": "handoff_to_agent",
-     "description": "Đề nghị chuyển cuộc trò chuyện cho nhân viên CSKH (HO-01 thiếu căn cứ, HO-03 khách muốn gặp người, HO-04 bức xúc/khiếu nại).",
+     "description": "Đề nghị chuyển cuộc trò chuyện cho nhân viên CSKH (HO-01 thiếu căn cứ, HO-03 khách muốn gặp người, HO-04 bức xúc/khiếu nại, HO-06 đòi hoàn tiền/bồi thường/ngoại lệ).",
      "inputSchema": {"type": "object", "properties": {
          "reason_code": {"type": "string", "enum": list(HANDOFF_CODES)},
          "summary": {"type": "string", "maxLength": 300}}, "required": ["reason_code"], "additionalProperties": False}},
