@@ -189,11 +189,21 @@ class StubAgent:
         order = self.orders.lookup(match.group(0), verifier.group(1) if verifier else "",
                                    email.group(0) if email else "") if match else None
         if order:
+            state.pop("order_auth_failures", None)
             return AgentOutput(
                 f"[Dữ liệu demo] Đơn {order['order_id']}: {order['status']}. "
                 f"{order['product']}. Cập nhật: {order['updated_at']}. {order['detail']}", state,
                 sources=[{"title": "Mock Order DB (MOCK-ORDER)", "section": "Dữ liệu giả chỉ dùng để trình diễn"}],
                 intent="Tư vấn")
+        if match and (verifier or email):                 # đã gửi mã đơn và thông tin đối chiếu nhưng sai (BR16)
+            fails = int(state.get("order_auth_failures", 0)) + 1
+            state["order_auth_failures"] = fails
+            if fails >= 3:                                # sai lần thứ 3 mới chuyển nhân viên
+                state.pop("order_auth_failures", None)
+                return AgentOutput("Mình chưa xác thực được đơn hàng sau nhiều lần thử, nên mình chuyển bạn cho "
+                                   "nhân viên CSKH hỗ trợ trực tiếp.", state, intent="Tư vấn", handoff_reason="HO-07")
+            return AgentOutput("Mình chưa xác thực được thông tin này. Bạn kiểm tra lại mã đơn và 4 số cuối số điện "
+                               "thoại (hoặc email) đã đăng ký, rồi gửi lại giúp mình nhé.", state, intent="Tư vấn")
         return AgentOutput("Để tra đơn demo, bạn cho mình mã đơn và 4 số cuối số điện thoại hoặc email "
                            "đăng ký. Ví dụ: SVN1001, 4 số cuối 1122.", state, intent="Tư vấn")
 
