@@ -34,7 +34,7 @@ def to_handoff(svc):
 
 def fill_ticket(svc):
     sid, tok, _ = start(svc, "tôi muốn đổi hàng, tạo yêu cầu")
-    for t in ["Nguyen Van A", "0912345678", "DH001", "Áo thun", "Sai size"]:
+    for t in ["Nguyen Van A", "0912345678", "SVN001", "Áo thun", "Sai size"]:
         r = say(svc, sid, tok, t)
     assert last(r)["ui"]["type"] == "ticket_summary"
     return sid, tok
