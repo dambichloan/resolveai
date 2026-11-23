@@ -103,8 +103,8 @@ ORDER_KEYWORDS = (
 
 
 def extract_order_code(text: str) -> Optional[str]:
-    m = re.search(r"\bDH[\s\-]?(\d{3,6})\b", text, re.IGNORECASE)
-    return f"DH{m.group(1)}" if m else None
+    m = re.search(r"\bSVN[\s\-]?(\d{3,6})\b", text, re.IGNORECASE)
+    return f"SVN{m.group(1)}" if m else None
 
 
 def extract_phone(text: str) -> Optional[str]:
