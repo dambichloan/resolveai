@@ -24,7 +24,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
      "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "maxLength": 300}},
                      "required": ["query"], "additionalProperties": False}},
     {"name": "lookup_order",
-     "description": "Tra cứu đơn trên Mock Order DB. Bắt buộc có mã đơn và 4 số cuối số điện thoại hoặc email đăng ký.",
+     "description": "Tra cứu đơn (mã SVN...) trên Mock Order DB hoặc Ticket (mã TK-YYYYMMDDXXXX). Bắt buộc có mã và 4 số cuối số điện thoại hoặc email đã đăng ký; sai 3 lần thì chuyển nhân viên.",
      "inputSchema": {"type": "object", "properties": {
          "order_id": {"type": "string", "maxLength": 20}, "phone_last4": {"type": "string", "maxLength": 4},
          "email": {"type": "string", "maxLength": 100}}, "required": ["order_id"], "additionalProperties": False}},
@@ -52,6 +52,8 @@ class Turn:
     sources: dict[str, float] = field(default_factory=dict)   # doc_code -> similarity
     texts: list[str] = field(default_factory=list)            # nội dung công cụ trả về, làm căn cứ cho Output Guard
     calls: int = 0
+    order_checked: bool = False                               # đã gọi lookup_order trong lượt này
+    order_failed: bool = False                                # lookup_order xác thực thất bại
     ticket: dict[str, Any] | None = None                      # Ticket được đề nghị
     handoff: str | None = None                                # mã Handoff được đề nghị
     log: list[dict[str, Any]] = field(default_factory=list)   # (tên, kết quả ngắn) cho trace
@@ -99,8 +101,8 @@ def validate(name: str, args: Any) -> str | None:
 
 class ToolRegistry:
     def __init__(self, search_fn: Callable[[str], list[dict]], order_fn: Callable[..., dict | None],
-                 rag_handoff: float, rag_answer: float):
-        self._search, self._order = search_fn, order_fn
+                 rag_handoff: float, rag_answer: float, ticket_fn: Callable[..., dict | None] | None = None):
+        self._search, self._order, self._ticket = search_fn, order_fn, ticket_fn
         self.rag_handoff, self.rag_answer = rag_handoff, rag_answer
 
     @staticmethod
@@ -134,7 +136,11 @@ class ToolRegistry:
 
     # ---- lookup_order
     def _lookup_order(self, args: dict, turn: Turn, raw_input: str) -> dict:
+        turn.order_checked = True
         order_id = args["order_id"].strip().upper()
+        is_ticket = bool(self._ticket) and bool(re.fullmatch(r"TK-?\d{12}", order_id))
+        if is_ticket:
+            order_id = "TK-" + re.sub(r"\D", "", order_id)
         phone_last4 = args.get("phone_last4", "").strip()
         email = args.get("email", "").strip()
         if not email:
@@ -144,20 +150,24 @@ class ToolRegistry:
             m = re.search(r"(?:số\s*cuối|đuôi|last\s*4)\D{0,20}(\d{4})", raw_input, re.I)
             phone_last4 = m.group(1) if m else ""
         if not phone_last4 and not email:
+            turn.state["order_pending"] = True            # lượt sau khách chỉ gửi 4 số cuối vẫn được tiếp tục tra đơn
             return {"found": False, "needs_verification": True,
                     "message": "Cần 4 số cuối số điện thoại hoặc email đăng ký trước khi tra đơn."}
-        order = self._order(order_id, phone_last4, email)
+        order = (self._ticket if is_ticket else self._order)(order_id, phone_last4, email)
         if order is None:
             n = int(turn.state.get("order_auth_failures", 0)) + 1
             turn.state["order_auth_failures"] = n
+            turn.state["order_pending"] = True
+            turn.order_failed = True
             if n >= 3:                                   # BR16: sai 3 lần thì chuyển nhân viên
                 turn.state["order_auth_locked"] = True
             return {"found": False, "needs_verification": True,
                     "message": "Không thể xác thực thông tin đơn. Hãy kiểm tra lại mã đơn và thông tin đối chiếu."}
         turn.state.pop("order_auth_failures", None)
-        turn.sources["MOCK-ORDER"] = 1.0
+        turn.state.pop("order_pending", None)
+        turn.sources["TICKET" if is_ticket else "MOCK-ORDER"] = 1.0
         turn.texts.append(json.dumps(order, ensure_ascii=False))
-        return {"found": True, "order": order}
+        return {"found": True, ("ticket" if is_ticket else "order"): order}
 
     # ---- create_ticket (chỉ đề nghị)
     def _create_ticket(self, args: dict, turn: Turn, raw_input: str) -> dict:
