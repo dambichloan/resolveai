@@ -155,3 +155,11 @@ Những điểm cần team quyết định hoặc hiện thực tiếp:
 - **EX-COM-04:** tạo Ticket ngoài giờ khi Handoff, chưa làm.
 - **Khóa phiên bản thư viện:** chạy `pip freeze` để cố định phiên bản trước khi nộp.
 - **Gemini miễn phí:** nếu dùng gói miễn phí thì chỉ nạp dữ liệu mẫu.
+
+## Lớp công cụ kiểu MCP và các Guard
+
+- `app/tools.py`: bốn công cụ `search_kb`, `lookup_order`, `create_ticket`, `handoff_to_agent` có `inputSchema` theo chuẩn MCP. Execution Guard kiểm tra allowlist, schema và giới hạn 3 lệnh gọi mỗi lượt. `create_ticket` và `handoff_to_agent` chỉ *đề nghị*: Ticket chỉ được tạo khi khách bấm Xác nhận, Backend vẫn là nơi ghi DB.
+- `app/mcp_server.py`: đặt `MCP_ENABLED=1` để mở `POST /mcp` (JSON-RPC 2.0: `initialize`, `tools/list`, `tools/call`) dùng chung danh mục công cụ. Đây là endpoint MCP tối giản, chưa có xác thực nên chỉ bật khi demo.
+- `llm_confidence`: mô hình phải kèm mức chắc chắn 0–1; thấp hơn `LLM_CONFIDENCE_THRESHOLD` (0,70) hoặc thiếu thì chuyển nhân viên (HO-01), cùng với ngưỡng similarity 0,65 / 0,70 của RAG.
+- `app/guardrails.py`: Input Guard chặn chèn lệnh và số thẻ/CVV/OTP/mật khẩu (số thẻ cũng bị che khi lưu tin nhắn); Output Guard chặn số liệu không có trong tài liệu hoặc kết quả công cụ và cam kết hoàn tiền/bồi thường ngoài chính sách.
+- Langfuse: đặt `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` trong môi trường để bật; mỗi công cụ là một span.

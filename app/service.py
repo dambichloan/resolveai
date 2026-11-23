@@ -10,6 +10,8 @@ Các điểm kiểm soát chính (Mục 25):
 from __future__ import annotations
 
 import json
+import unicodedata
+import re
 import logging
 import math
 import threading
@@ -23,7 +25,7 @@ from . import security
 from .agent_port import AgentInput, AgentOutput, AgentPort
 from .config import Settings
 from .db import Database
-from .guardrails import guard_output
+from .guardrails import guard_output, mask_card
 from . import kb
 from .hours import in_business_hours
 from .ratelimit import SlidingWindowLimiter
@@ -57,6 +59,12 @@ def _iso(dt: datetime) -> str:
     return dt.isoformat(timespec="seconds")
 
 
+def _slug(title: str) -> str:
+    t = unicodedata.normalize("NFD", title.replace("đ", "d").replace("Đ", "D"))
+    t = "".join(ch for ch in t if unicodedata.category(ch) != "Mn").lower()
+    return re.sub(r"[^a-z0-9]+", "-", t).strip("-")[:60] or "tai-lieu"
+
+
 class ChatService:
     def __init__(self, db: Database, settings: Settings, agent: AgentPort, *,
                  limiter: SlidingWindowLimiter | None = None,
@@ -68,6 +76,7 @@ class ChatService:
         self.now, self.sleep = now_fn, sleep_fn
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
+        self._kb_lock = threading.Lock()
 
     # ================================================================ tiện ích
     def _lock_for(self, session_id: str) -> threading.Lock:
@@ -186,7 +195,7 @@ class ChatService:
             else:
                 duplicate = False
             if not duplicate:
-                cust_id = self._add_message(c, session_id, "customer", text or ACTION_LABELS.get(action, ""),
+                cust_id = self._add_message(c, session_id, "customer", mask_card(text) or ACTION_LABELS.get(action, ""),
                                             client_msg_id=client_msg_id)
             status, state = row["status"], json.loads(row["state_json"])
         if duplicate or status != "AI_Handling":
@@ -493,7 +502,7 @@ class ChatService:
                 "tickets_by_status": {s: tickets.get(s, 0) for s in TICKET_FLOW},
                 "avg_latency_ms": round(lat) if lat is not None else None}
 
-    # ---- Kho tài liệu KB: chỉ xem (data/policies). Tải lên/sửa/xóa thuộc module RAG (FR-ADM-02/03)
+    # ---- Kho tài liệu KB (data/policies): xem và thêm mới; sửa/xóa chưa làm
     def kb_list(self) -> list[dict]:
         return [{k: v for k, v in d.items() if k != "content"} for d in kb.load_docs(self.s.policies_dir)]
 
@@ -503,6 +512,52 @@ class ChatService:
                 return d
         raise ApiError(404, "not_found", "Không tìm thấy tài liệu.")
 
+    # ---- Thêm tài liệu KB thủ công (FR-ADM-02): ghi file .md có front matter vào data/policies
+    KB_TYPES = ("policy", "faq")
+    KB_MAX_TITLE, KB_MAX_CONTENT = 200, 20000
+
+    def kb_create(self, title: str | None, content: str | None, doc_type: str | None = None,
+                  effective_date: str | None = None) -> dict:
+        title = " ".join((title or "").split())          # gộp xuống dòng để không phá front matter
+        content = (content or "").replace("\r\n", "\n").strip()
+        doc_type = (doc_type or "policy").strip()
+        if not title or not content:
+            raise ApiError(422, "empty_doc", "Cần nhập cả tiêu đề và nội dung tài liệu.")
+        if len(title) > self.KB_MAX_TITLE or len(content) > self.KB_MAX_CONTENT:
+            raise ApiError(422, "doc_too_long", f"Tiêu đề tối đa {self.KB_MAX_TITLE} ký tự, "
+                                                f"nội dung tối đa {self.KB_MAX_CONTENT} ký tự.")
+        if doc_type not in self.KB_TYPES:
+            raise ApiError(422, "bad_doc_type", "Loại tài liệu không hợp lệ.")
+        today = self.now().astimezone(ZoneInfo(self.s.timezone)).date()
+        try:
+            eff = datetime.strptime(effective_date, "%Y-%m-%d").date() if effective_date else today
+        except ValueError:
+            raise ApiError(422, "bad_date", "Ngày hiệu lực phải có dạng YYYY-MM-DD.") from None
+        with self._kb_lock:                                # tránh hai người thêm cùng lúc trùng mã
+            pdir = self.s.policies_dir
+            pdir.mkdir(parents=True, exist_ok=True)
+            docs = kb.load_docs(pdir)
+            if any(d["title"].strip().lower() == title.lower() and d["is_active"] for d in docs):
+                raise ApiError(409, "duplicate_title", "Đã có tài liệu đang hiệu lực với tiêu đề này.")
+            nums = [int(m.group(1)) for d in docs if (m := re.fullmatch(r"KB-(\d+)", d["doc_code"] or ""))]
+            code = f"KB-{max(nums, default=0) + 1:02d}"
+            fname = f"{_slug(title)}.md"
+            n = 2
+            while (pdir / fname).exists():
+                fname = f"{_slug(title)}-{n}.md"; n += 1
+            text = (f"---\ndoc_code: {code}\ntitle: {title}\ndoc_type: {doc_type}\nversion: 1.0\n"
+                    f"effective_date: {eff.isoformat()}\nis_active: true\nsource_file: {fname}\n---\n\n"
+                    f"{content}\n")
+            tmp = pdir / (fname + ".tmp")
+            tmp.write_text(text, encoding="utf-8")
+            tmp.replace(pdir / fname)                      # ghi nguyên tử, không để lại file dở
+        reload_kb = getattr(self.agent, "reload_kb", None)
+        if reload_kb:                                      # Agent đọc lại kho để dùng ngay, không cần khởi động lại
+            try:
+                reload_kb()
+            except Exception:  # noqa: BLE001
+                log.warning("Agent chưa nạp lại được kho tài liệu: %s", code)
+        return self.kb_get(code)
+
     def kb_not_implemented(self):
-        raise ApiError(501, "not_implemented", "Tải lên, sửa, xóa tài liệu KB chưa được hiện thực trong khung mẫu "
-                                              "(thuộc module RAG, FR-ADM-02/03).")
+        raise ApiError(501, "not_implemented", "Sửa và xóa tài liệu KB chưa được hiện thực.")

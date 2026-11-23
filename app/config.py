@@ -33,6 +33,8 @@ class Settings:
     embed_model: str = "gemini-embedding-2"
     embedding_dimensions: int = 768
     rag_top_k: int = 3
+    llm_confidence_threshold: float = 0.70   # llm_confidence thấp hơn thì chuyển nhân viên (BR6)
+    mcp_enabled: bool = False                # mở /mcp (JSON-RPC MCP) cho các công cụ
     rag_handoff_threshold: float = 0.65
     rag_answer_threshold: float = 0.70
     langfuse_public_key: str = field(default="", repr=False)
@@ -76,6 +78,8 @@ def load_settings() -> Settings:
         embed_model=e("EMBED_MODEL", "").strip() or "gemini-embedding-2",
         embedding_dimensions=int(e("EMBEDDING_DIMENSIONS", "768")),
         rag_top_k=int(e("RAG_TOP_K", "3")),
+        llm_confidence_threshold=float(e("LLM_CONFIDENCE_THRESHOLD", "0.70")),
+        mcp_enabled=_bool(e("MCP_ENABLED"), False),
         rag_handoff_threshold=float(e("RAG_HANDOFF_THRESHOLD", "0.65")),
         rag_answer_threshold=float(e("RAG_ANSWER_THRESHOLD", "0.70")),
         langfuse_public_key=e("LANGFUSE_PUBLIC_KEY", "").strip(),

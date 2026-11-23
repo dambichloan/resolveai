@@ -28,6 +28,7 @@ class AgentOutput:
     intent: str | None = None
     handoff_reason: str | None = None            # HO-01..HO-08: đề nghị Handoff
     create_ticket: dict[str, Any] | None = None  # đề nghị tạo Ticket (cần Guard cho phép)
+    meta: dict[str, Any] = field(default_factory=dict)  # số liệu quan sát (công cụ đã gọi, độ tin cậy, cờ Guard)
 
 
 class AgentPort(Protocol):

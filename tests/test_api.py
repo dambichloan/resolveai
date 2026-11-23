@@ -42,7 +42,7 @@ def test_admin_open_without_login_and_static_pages(client):
     assert [d["doc_code"] for d in docs] == ["KB-01", "KB-02", "KB-03", "KB-04", "KB-05", "KB-06"]
     assert "7 ngày" in client.get("/api/admin/kb/docs/KB-01").json()["content"]
     assert client.get("/api/admin/kb/docs/KB-99").status_code == 404
-    assert client.post("/api/admin/kb/docs").status_code == 501
+    assert client.put("/api/admin/kb/docs/KB-01").status_code == 501
     assert "SAVANI" in client.get("/").text
     assert client.get("/chat/").status_code == 200
     assert client.get("/widget/widget.js").status_code == 200

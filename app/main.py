@@ -38,6 +38,13 @@ class TextIn(BaseModel):
     text: str
 
 
+class KbIn(BaseModel):
+    title: str | None = None
+    content: str | None = None
+    doc_type: str | None = None
+    effective_date: str | None = None
+
+
 class StatusIn(BaseModel):
     status: str
     note: str | None = None
@@ -126,6 +133,16 @@ def create_app(settings: Settings | None = None, agent: AgentPort | None = None)
     def dashboard(date_from: str | None = None, date_to: str | None = None, _: dict = Depends(staff)):
         return svc.dashboard(date_from, date_to)
 
+    if settings.mcp_enabled and hasattr(svc.agent, "mcp_handle"):
+        @app.post("/mcp")
+        async def mcp_endpoint(request: Request):
+            try:
+                message = await request.json()
+            except ValueError:
+                return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}})
+            reply = svc.agent.mcp_handle(message)
+            return JSONResponse(reply) if reply is not None else JSONResponse(None, status_code=202)
+
     @app.get("/api/admin/kb/docs")
     def kb_list(_: dict = Depends(staff)):
         return {"items": svc.kb_list()}
@@ -134,9 +151,12 @@ def create_app(settings: Settings | None = None, agent: AgentPort | None = None)
     def kb_get(doc_code: str, _: dict = Depends(staff)):
         return svc.kb_get(doc_code)
 
-    @app.api_route("/api/admin/kb/docs", methods=["POST"])
+    @app.post("/api/admin/kb/docs", status_code=201)
+    def kb_create(body: KbIn, _: dict = Depends(staff)):
+        return svc.kb_create(body.title, body.content, body.doc_type, body.effective_date)
+
     @app.api_route("/api/admin/kb/docs/{doc_code}", methods=["PUT", "DELETE"])
-    def kb_write(doc_code: str | None = None, _: dict = Depends(staff)):
+    def kb_write(doc_code: str, _: dict = Depends(staff)):
         svc.kb_not_implemented()
 
     # StaticFiles phục vụ thư mục khi URL có dấu / cuối. Hai redirect này giúp
@@ -149,10 +169,7 @@ def create_app(settings: Settings | None = None, agent: AgentPort | None = None)
     def chat_root():
         return RedirectResponse("/chat/")
 
-    @app.api_route("/api/admin/kb/docs", methods=["POST"])
-    @app.api_route("/api/admin/kb/docs/{doc_code}", methods=["PUT", "DELETE"])
-    def kb_write(doc_code: str | None = None, _: dict = Depends(staff)):
-        svc.kb_not_implemented()   
+   
     
     # ---------------- giao diện tĩnh (đặt sau cùng để không che /api)
     app.mount("/admin", StaticFiles(directory=WEB_DIR / "admin", html=True), name="admin")

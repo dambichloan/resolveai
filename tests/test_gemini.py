@@ -31,14 +31,13 @@ def _inp(text, state=None, action=None):
 
 
 def test_answer_with_valid_source(tmp_path):
-    a, calls = _agent(tmp_path, _resp(decision="answer", reply="Đổi trả trong 7 ngày.", sources=["KB-01"], intent="Đổi trả"))
+    a, calls = _agent(tmp_path, _resp(decision="answer", reply="Đổi trả trong 7 ngày.", sources=["KB-01"],
+                                      intent="Đổi trả", llm_confidence=0.9))
+    # không gọi search_kb thì không có nguồn đã truy xuất: không được trả lời chính sách (BR2)
     out = a.run_turn(_inp("hàng giảm giá 30% có đổi được không"))
-    assert out.reply.startswith("Đổi trả") and out.handoff_reason is None
-    assert out.sources[0]["title"].endswith("(KB-01)")
-    assert out.state["hist"][-1]["r"] == "a"
+    assert out.handoff_reason == "HO-01" and not out.sources
     url, headers, body = calls[0]
     assert "key" not in url and headers["x-goog-api-key"] == "K"
-    assert "KB-01" in body["systemInstruction"]["parts"][0]["text"]
 
 
 def test_answer_without_valid_source_becomes_handoff(tmp_path):

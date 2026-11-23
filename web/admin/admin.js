@@ -7,7 +7,7 @@
   var NEXT = { "Mới": "Đang xử lý", "Đang xử lý": "Đã hoàn thành" };
   var STATUS = { AI_Handling: ["AI đang xử lý", "green"], Waiting_Agent: ["Chờ nhân viên", "red"], Agent_Handling: ["Nhân viên đang xử lý", "dark"], Closed: ["Đã đóng", ""] };
   var TSTATUS = { "Mới": "red", "Đang xử lý": "amber", "Đã hoàn thành": "green" };
-  var HO = { "HO-01": "Không đủ căn cứ trả lời", "HO-03": "Khách yêu cầu gặp nhân viên", "HO-04": "Khách bức xúc / khiếu nại", "HO-08": "Lỗi hệ thống Agent" };
+  var HO = { "HO-01": "Không đủ căn cứ trả lời", "HO-03": "Khách yêu cầu gặp nhân viên", "HO-04": "Khách bức xúc / khiếu nại", "HO-07": "Vượt phạm vi xử lý an toàn (xác thực đơn sai nhiều lần)", "HO-08": "Lỗi hệ thống Agent" };
   var HERO = {
     queue: ["Hàng đợi hỗ trợ", "Tiếp nhận các cuộc trò chuyện mà trợ lý AI đã chuyển cho nhân viên."],
     tickets: ["Ticket", "Yêu cầu đổi trả, bảo hành và khiếu nại đã được ghi nhận. Mã Ticket theo dạng TK-YYYYMMDDXXXX."],
@@ -191,7 +191,7 @@
     }).catch(fail);
   }
 
-  // ---- Tài liệu KB (chỉ xem)
+  // ---- Tài liệu KB (xem và thêm mới)
   function loadKb() {
     api("GET", "/api/admin/kb/docs").then(function (d) {
       var box = $("kbList"); clear(box);
@@ -223,9 +223,37 @@
       var box = $("kbDoc"); clear(box);
       var row = el("div", "row"); row.appendChild(pill(d.doc_code, "red")); row.appendChild(pill(d.doc_type)); row.appendChild(el("span", "muted", "v" + d.version + " · hiệu lực từ " + d.effective_date + " · " + d.source_file));
       box.appendChild(row); box.appendChild(renderMd(d.content));
-      box.appendChild(el("p", "muted", "Tải lên, sửa và xóa tài liệu thuộc module RAG (chưa hiện thực trong khung mẫu)."));
+      box.appendChild(el("p", "muted", "Sửa và xóa tài liệu chưa hiện thực; hiện chỉ thêm mới."));
     }).catch(fail);
   }
+
+  function kbField(box, label, node) {
+    var w = el("label", null); w.style.display = "flex"; w.style.flexDirection = "column"; w.style.gap = "4px";
+    w.appendChild(el("span", null, label)); w.appendChild(node); box.appendChild(w); return node;
+  }
+  function showKbForm() {
+    cur.kb = null; loadKb();
+    var box = $("kbDoc"); clear(box); box.appendChild(el("h1", null, "Thêm tài liệu"));
+    box.appendChild(el("p", "muted", "Tài liệu được lưu vào kho chính sách và trợ lý AI dùng ngay cho các câu hỏi sau, không cần khởi động lại. Trong nội dung có thể dùng tiêu đề (## Mục) và gạch đầu dòng (- ý) để chia đoạn."));
+    var form = el("div"); form.style.display = "flex"; form.style.flexDirection = "column"; form.style.gap = "12px"; box.appendChild(form);
+    var title = kbField(form, "Tiêu đề", el("input")); title.maxLength = 200; title.placeholder = "Ví dụ: Chính sách thành viên";
+    var type = kbField(form, "Loại tài liệu", el("select"));
+    [["policy", "Chính sách"], ["faq", "Câu hỏi thường gặp"]].forEach(function (o) { var op = el("option", null, o[1]); op.value = o[0]; type.appendChild(op); });
+    var date = kbField(form, "Ngày hiệu lực (để trống = hôm nay)", el("input")); date.type = "date";
+    var content = kbField(form, "Nội dung", el("textarea")); content.rows = 14; content.maxLength = 20000; content.placeholder = "Dán hoặc gõ nội dung tài liệu…";
+    var actions = el("div", "row"), save = el("button", "primary", "Lưu tài liệu"), cancel = el("button", null, "Hủy");
+    actions.appendChild(save); actions.appendChild(cancel); form.appendChild(actions);
+    cancel.addEventListener("click", function () { clear(box); box.appendChild(el("p", "muted", "Chọn một tài liệu để xem nội dung.")); });
+    save.addEventListener("click", function () {
+      if (!title.value.trim() || !content.value.trim()) { toast("Cần nhập cả tiêu đề và nội dung."); return; }
+      save.disabled = true;
+      api("POST", "/api/admin/kb/docs", { title: title.value, content: content.value, doc_type: type.value, effective_date: date.value || null })
+        .then(function (d) { toast("Đã thêm tài liệu " + d.doc_code); cur.kb = d.doc_code; loadKb(); showKb(d.doc_code); })
+        .catch(function (e) { save.disabled = false; fail(e); });
+    });
+    title.focus();
+  }
+  $("kbAdd").addEventListener("click", showKbForm);
 
   setTab("queue");
 })();
