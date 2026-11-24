@@ -249,7 +249,7 @@ class GeminiAgent:
                 data, turn = self._ask(inp, model, turn)
                 return {"output": self._to_output(inp, data, turn, model)}
             except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, IndexError, TypeError) as exc:
-                log.warning("Gemini model %s lỗi: %s", model, type(exc).__name__)
+                
                 # Preserve a guarded tool outcome even if final text generation failed.
                 if turn.handoff or turn.ticket or turn.state.get("order_auth_locked"):
                     return {"output": self._to_output(inp, {}, turn, model)}
