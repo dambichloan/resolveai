@@ -248,13 +248,26 @@ class GeminiAgent:
             try:
                 data, turn = self._ask(inp, model, turn)
                 return {"output": self._to_output(inp, data, turn, model)}
-            except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, IndexError, TypeError) as exc:
-                log.warning("Gemini model %s lỗi HTTP %s: %s", model, getattr(exc, "code", type(exc).__name__), exc)
-                
+            except Exception as exc:  # noqa: BLE001 (không để lộ khóa; ghi rõ nguyên nhân để chẩn đoán)
+                log.warning("Gemini model %s lỗi: %s", model, self._describe_error(exc))
                 # Preserve a guarded tool outcome even if final text generation failed.
                 if turn.handoff or turn.ticket or turn.state.get("order_auth_locked"):
                     return {"output": self._to_output(inp, {}, turn, model)}
         return {"output": self._unavailable(turn.state)}
+
+    @staticmethod
+    def _describe_error(exc: Exception) -> str:
+        """Tên lỗi + mã HTTP + đoạn đầu phản hồi của Google (không chứa khóa)."""
+        text = type(exc).__name__
+        if isinstance(exc, urllib.error.HTTPError):
+            try:
+                body = exc.read().decode("utf-8", "replace")[:300].replace("\n", " ")
+            except Exception:  # noqa: BLE001
+                body = ""
+            text += f" HTTP {exc.code} {body}"
+        elif str(exc):
+            text += f" {str(exc)[:200]}"
+        return text
 
     @staticmethod
     def _unavailable(state: dict) -> AgentOutput:
@@ -460,14 +473,12 @@ class GeminiAgent:
                 self._remember(state, inp.text, reply)
                 return AgentOutput(reply, state, intent=intent or "Tư vấn", meta=trace)
         if decision == "collect":
+            # Dùng cả khi tư vấn size (chưa có Ticket): ticket_draft có thể thiếu hoặc rỗng, đó không phải lỗi.
             draft = data.get("ticket_draft")
-            if not isinstance(draft, dict):
-                return self._unavailable(state)
-            draft = self._restore_contact(draft, state)
+            draft = self._restore_contact(draft, state) if isinstance(draft, dict) else {}
             fields = SPEC_BY_NAME["create_ticket"]["inputSchema"]["properties"]
-            if any(k not in fields or not isinstance(v, str) or len(v) > fields[k].get("maxLength", 500)
-                   for k, v in draft.items()):
-                return self._unavailable(state)
+            draft = {k: v.strip() for k, v in draft.items()
+                     if k in fields and isinstance(v, str) and v.strip() and len(v) <= fields[k].get("maxLength", 500)}
             merged = dict(state.get("draft", {}))
             merged.update(draft)
             state["clarify_count"] = 0
@@ -501,6 +512,7 @@ class GeminiAgent:
             state["clarify_count"] = 0
             self._remember(state, inp.text, reply)
             return AgentOutput(reply, state, sources=sources, intent=intent or "Tư vấn", meta=trace)
+        log.warning("Gemini trả decision không hợp lệ: %r", decision)
         return self._unavailable(state)
 
     def _source(self, code: str) -> dict[str, str]:

@@ -234,3 +234,11 @@ def test_refusing_contact_cannot_create_ticket(tmp_path):
     out = turn(a, "Tạo ticket, tôi không đưa tên và số điện thoại")
     again = turn(a, "không đưa", out.state)
     assert again.create_ticket is None and not again.state["draft"].get("contact")
+
+
+def test_collect_without_ticket_draft_is_not_an_error(tmp_path):
+    """Gemini thật hay bỏ trường ticket_draft khi hỏi tiếp tư vấn size: không được báo 'hệ thống gián đoạn'."""
+    a = make(tmp_path, [text(decision="collect", reply="Bạn cho mình biết giới tính, chiều cao và cân nặng nhé?",
+                             llm_confidence=0.9)])
+    out = turn(a, "Tư vấn size")
+    assert out.handoff_reason is None and "chiều cao" in out.reply and "draft" not in out.state

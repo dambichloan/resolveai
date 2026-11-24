@@ -17,6 +17,7 @@ from .operations import configure_technical_log
 from . import observability
 from .service import ApiError, ChatService
 
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s - %(message)s")
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
@@ -25,6 +26,9 @@ def build_agent(settings: Settings) -> AgentPort:
     if not settings.gemini_api_key:
         raise RuntimeError("Cần đặt GEMINI_API_KEY để chạy ResolveAI.")
     from .gemini_agent import GeminiAgent
+    logging.getLogger("resolveai").info("Gemini: có khóa (%d ký tự), model=%s, dự phòng=%s, embed=%s",
+                                        len(settings.gemini_api_key), settings.llm_model,
+                                        settings.llm_fallback_model or "-", settings.embed_model)
     return GeminiAgent(settings)
 
 
