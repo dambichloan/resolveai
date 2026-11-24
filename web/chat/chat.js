@@ -25,7 +25,8 @@
     chips.textContent = "";
     QUICK.forEach(function (q) {
       var b = el("button", null, q); b.type = "button";
-      b.addEventListener("click", function () { if (!sending && !input.disabled) send(q, null); });
+      var action = ({ "Chính sách đổi trả": "policy_return", "Chính sách bảo hành": "policy_warranty", "Gặp nhân viên": "request_handoff" })[q] || null;
+      b.addEventListener("click", function () { if (!sending && !input.disabled) send(q, action); });
       chips.appendChild(b);
     });
   }
