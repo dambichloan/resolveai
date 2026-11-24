@@ -375,7 +375,7 @@ class ChatService:
 
     # ================================================================ nhân viên
     def ensure_bootstrap_admin(self) -> None:
-        """Khởi tạo tài khoản quản trị từ biến môi trường, không có mật khẩu mặc định."""
+        """Tạo hoặc đồng bộ tài khoản quản trị từ biến môi trường."""
         username = (self.s.admin_user or "").strip()
         password = self.s.admin_password or ""
         if not username or not password:
@@ -385,8 +385,9 @@ class ChatService:
             if row is None:
                 c.execute("INSERT INTO staff(username, password_hash, created_at) VALUES (?,?,?)",
                           (username, security.hash_password(password), _iso(self.now())))
-            elif row["password_hash"] == "!":
-                # Nâng cấp DB của bản cũ vốn tạo nhân viên không thể đăng nhập.
+            elif not security.check_password(password, row["password_hash"]):
+                # Giữ tài khoản bootstrap đồng bộ với ADMIN_BOOTSTRAP_PASSWORD.
+                # Nhờ đó đổi biến môi trường trên Render cũng đặt lại được mật khẩu.
                 c.execute("UPDATE staff SET password_hash=? WHERE id=?",
                           (security.hash_password(password), row["id"]))
 
