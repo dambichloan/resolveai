@@ -25,11 +25,10 @@ class Settings:
     timezone: str = "Asia/Ho_Chi_Minh"      # giờ làm việc CSKH 08:00-17:30, T2-T7
     cookie_secure: bool = False             # đặt 1 khi chạy sau HTTPS
     staff_session_hours: int = 8
-    fake_llm: bool = True                   # True: dùng StubAgent, không gọi API
     gemini_api_key: str = field(default="", repr=False)  # khóa API Gemini (đặt qua biến môi trường GEMINI_API_KEY)
     llm_model: str = "gemini-3.5-flash-lite"
-    llm_fallback_model: str = "gemini-3.1-flash-lite"
-    llm_timeout: float = 20.0               # giây chờ Gemini trước khi quay về câu trả lời mẫu
+    llm_fallback_model: str = ""            # tùy chọn model Gemini dự phòng
+    llm_timeout: float = 20.0               # giây cho mỗi yêu cầu Gemini
     embed_model: str = "gemini-embedding-2"
     embedding_dimensions: int = 768
     rag_top_k: int = 3
@@ -70,10 +69,9 @@ def load_settings() -> Settings:
         timezone=e("TZ", "Asia/Ho_Chi_Minh"),
         cookie_secure=_bool(e("COOKIE_SECURE")),
         staff_session_hours=int(e("STAFF_SESSION_HOURS", "8")),
-        fake_llm=_bool(e("FAKE_LLM"), True),
         gemini_api_key=e("GEMINI_API_KEY", "").strip(),
         llm_model=e("LLM_MODEL", "").strip() or "gemini-3.5-flash-lite",
-        llm_fallback_model=e("LLM_FALLBACK_MODEL", "").strip() or "gemini-3.1-flash-lite",
+        llm_fallback_model=e("LLM_FALLBACK_MODEL", "").strip(),
         llm_timeout=float(e("LLM_TIMEOUT", "20")),
         embed_model=e("EMBED_MODEL", "").strip() or "gemini-embedding-2",
         embedding_dimensions=int(e("EMBEDDING_DIMENSIONS", "768")),

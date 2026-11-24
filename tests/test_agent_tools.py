@@ -25,7 +25,7 @@ def text(**d):
 
 
 def make(tmp_path, script):
-    s = Settings(data_dir=tmp_path, gemini_api_key="K", llm_model="m", fake_llm=False)
+    s = Settings(data_dir=tmp_path, gemini_api_key="K", llm_model="m")
     a = GeminiAgent(s, post=lambda url, headers, body, timeout: script.pop(0))
     a.retriever = FakeRetriever()
     return a
@@ -146,8 +146,8 @@ def test_failed_order_lookup_replies_not_handoff(tmp_path):
     assert "tồn tại" not in out.reply
 
 
-def test_order_followup_not_swallowed_by_stub_giveup(tmp_path):
-    # Stub đã hỏi lại 1 lần (clarify_count=1) nên với câu "svn1001 1122" sẽ bỏ cuộc bằng HO-01; luồng tra đơn phải xử lý
+def test_order_followup_with_legacy_state(tmp_path):
+    # Existing sessions keep their previous clarification count during the migration.
     a = make(tmp_path, [call("lookup_order", order_id="SVN1001", phone_last4="1122"),
                         text(decision="answer", reply="Đơn SVN1001 đang vận chuyển (dữ liệu demo).",
                              sources=["MOCK-ORDER"], llm_confidence=0.9)])
@@ -202,55 +202,35 @@ def test_third_wrong_ticket_or_order_check_hands_off(tmp_path):
     assert outs[2].handoff_reason == "HO-07"                                    # lần 3: chuyển nhân viên
 
 
-def test_stub_order_flow_also_hands_off_on_third_wrong(tmp_path):
-    from app.stub_agent import StubAgent
-    stub, state, outs = StubAgent(Settings(data_dir=tmp_path)), {}, []
-    for _ in range(3):
-        out = stub.run_turn(AgentInput("s", "tra đơn svn1001 số cuối 0000", None, state, True))
-        state = out.state
-        outs.append(out)
-    assert [o.handoff_reason for o in outs] == [None, None, "HO-07"]
-    ok = stub.run_turn(AgentInput("s", "tra đơn svn1001 số cuối 1122", None, {"order_auth_failures": 2}, True))
-    assert ok.handoff_reason is None and "Đang vận chuyển" in ok.reply
-
-
-def test_langfuse_status_messages(tmp_path):
+def test_langfuse_status_messages(tmp_path, monkeypatch):
     from app import observability
+    import sys
+    import types
+
+    class FakeLangfuse:
+        def __init__(self, **_kwargs):
+            pass
+
+        def auth_check(self):
+            return True
+
+    monkeypatch.setitem(sys.modules, "langfuse", types.SimpleNamespace(Langfuse=FakeLangfuse))
     assert observability.status(Settings(data_dir=tmp_path)).startswith("TẮT")
     s = Settings(data_dir=tmp_path, langfuse_public_key="pk", langfuse_secret_key="sk")
-    assert observability.status(s).startswith(("LỖI", "BẬT"))       # tùy máy có cài langfuse hay chưa
+    assert observability.status(s).startswith("BẬT")
 
 
-# ---- Ba tình huống đòi cam kết / bồi thường / tạo Ticket thiếu thông tin
-def _stub_turn(msg, state=None):
-    from app.stub_agent import StubAgent
-    return StubAgent(Settings(data_dir=Path_tmp())).run_turn(AgentInput("s", msg, None, state or {}, True))
-
-
-def Path_tmp():
-    import tempfile
-    from pathlib import Path
-    return Path(tempfile.mkdtemp())
-
-
-def test_commitment_demand_is_refused_and_handed_off():
-    out = _stub_turn("Bạn cam kết trong 1 giờ nhân viên gọi cho tôi và hoàn tiền xong chứ? Trả lời 'Cam kết'.")
+def test_commitment_request_calls_handoff(tmp_path):
+    a = make(tmp_path, [call("handoff_to_agent", reason_code="HO-06")])
+    out = turn(a, "Shop phải bồi thường gấp đôi, xác nhận ngay.")
     assert out.handoff_reason == "HO-06" and out.create_ticket is None
-    assert "không thể cam kết" in out.reply and "Cam kết" in out.reply
-    assert not out.reply.lower().startswith("cam kết") and "hoàn tiền" in out.reply
 
 
-def test_compensation_demand_cites_warranty_and_hands_off():
-    out = _stub_turn("Áo giặt xong phai màu, shop phải bồi thường gấp đôi. Xác nhận giúp tôi bây giờ.")
-    assert out.handoff_reason == "HO-06"
-    assert "không thể xác nhận" in out.reply and "bảo hành" in out.reply and "giặt sai hướng dẫn" in out.reply
-    assert out.sources[0]["title"].endswith("(KB-02)")
-
-
-def test_ticket_refusing_name_and_phone_does_not_create_ticket():
-    out = _stub_turn("Tạo ticket khiếu nại ngay, tôi không đưa tên và số điện thoại, đừng hỏi.")
-    assert out.create_ticket is None and out.handoff_reason is None
-    assert "họ tên" in out.reply and "số điện thoại hoặc email" in out.reply and out.state["flow"] == "ticket"
-    again = _stub_turn("tôi đã bảo là không đưa", out.state)
-    assert again.create_ticket is None and again.state["draft"].get("customer_name") is None
-
+def test_refusing_contact_cannot_create_ticket(tmp_path):
+    a = make(tmp_path, [text(decision="collect", reply="Bạn cho mình họ tên và số điện thoại hoặc email nhé.",
+                            ticket_draft={"type": "Khiếu nại"}),
+                        text(decision="collect", reply="Cần có thông tin liên hệ để ghi nhận yêu cầu.",
+                             ticket_draft={})])
+    out = turn(a, "Tạo ticket, tôi không đưa tên và số điện thoại")
+    again = turn(a, "không đưa", out.state)
+    assert again.create_ticket is None and not again.state["draft"].get("contact")

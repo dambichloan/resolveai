@@ -1,6 +1,6 @@
 """Run the fixed offline evaluation cases against the configured live Gemini agent.
 
-Usage: set FAKE_LLM=0 and GEMINI_API_KEY, then run python -m scripts.run_evals.
+Usage: set GEMINI_API_KEY, then run python -m scripts.run_evals.
 The runner writes DATA_DIR/evals/latest.json and never runs during application startup.
 """
 from __future__ import annotations
@@ -18,8 +18,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def main() -> None:
     settings = load_settings()
-    if settings.fake_llm or not settings.gemini_api_key:
-        raise SystemExit("Eval cần FAKE_LLM=0 và GEMINI_API_KEY trong môi trường.")
+    if not settings.gemini_api_key:
+        raise SystemExit("Eval cần GEMINI_API_KEY trong môi trường.")
     agent = GeminiAgent(settings)
     cases = [json.loads(line) for line in (ROOT / "evals" / "resolveai.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
     results = []

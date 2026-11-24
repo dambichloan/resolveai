@@ -5,14 +5,15 @@ pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 from fastapi.testclient import TestClient  # noqa: E402
 
+from tests.gemini_responses import agent as test_agent
 from app.config import Settings  # noqa: E402
 from app.main import create_app  # noqa: E402
 
 
 @pytest.fixture
 def client(tmp_path):
-    s = Settings(data_dir=tmp_path, secret_key="k", admin_user="admin", admin_password="pw12345", hotline="1900")
-    return TestClient(create_app(s))
+    s = Settings(data_dir=tmp_path, secret_key="k", admin_user="admin", admin_password="pw12345", hotline="1900", gemini_api_key="test-key")
+    return TestClient(create_app(s, agent=test_agent(s)))
 
 
 def test_health(client):

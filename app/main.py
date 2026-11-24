@@ -14,19 +14,16 @@ from .config import Settings, load_settings
 from .db import Database
 from . import observability
 from .service import ApiError, ChatService
-from .stub_agent import StubAgent
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
 def build_agent(settings: Settings) -> AgentPort:
-    """FAKE_LLM=1 dùng StubAgent; FAKE_LLM=0 dùng Gemini với tool calling, cần GEMINI_API_KEY."""
-    if settings.fake_llm:
-        return StubAgent(settings)
+    """Khởi tạo Gemini cho hội thoại và gọi công cụ nghiệp vụ."""
     if not settings.gemini_api_key:
-        raise RuntimeError("FAKE_LLM=0 cần biến môi trường GEMINI_API_KEY (khóa Gemini).")
+        raise RuntimeError("Cần đặt GEMINI_API_KEY để chạy ResolveAI.")
     from .gemini_agent import GeminiAgent
-    return GeminiAgent(settings, fallback=StubAgent(settings))
+    return GeminiAgent(settings)
 
 
 class ChatIn(BaseModel):
