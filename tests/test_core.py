@@ -23,7 +23,8 @@ def last(r):
 
 
 def staff(svc):
-    return svc.require_staff()
+    login = svc.login_staff("admin", "pw12345")
+    return svc.require_staff(login["token"])
 
 
 def to_handoff(svc):
@@ -233,10 +234,21 @@ def test_business_hours(y, m, d, h, mi, exp):
     assert in_business_hours(datetime(y, m, d, h, mi, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))) is exp
 
 
-def test_admin_no_login_and_hash(svc):
-    st = svc.require_staff()
+def test_admin_login_and_hash(svc):
+    with pytest.raises(ApiError) as e:
+        svc.require_staff()
+    assert e.value.status == 401
+    with pytest.raises(ApiError) as e:
+        svc.login_staff("admin", "sai")
+    assert e.value.status == 401
+    login = svc.login_staff("admin", "pw12345")
+    st = svc.require_staff(login["token"])
     assert st["username"] == "admin" and st["id"]
-    assert svc.require_staff(None) == st
+    with svc.db.conn() as c:
+        assert login["token"] not in c.execute("SELECT token_hash FROM staff_session").fetchone()[0]
+    svc.logout_staff(login["token"])
+    with pytest.raises(ApiError):
+        svc.require_staff(login["token"])
     h = security.hash_password("abc")
     assert "abc" not in h and security.check_password("abc", h) and not security.check_password("abd", h)
 

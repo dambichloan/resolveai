@@ -140,7 +140,7 @@ def seed_demo(db: Database, settings: Settings, now: datetime | None = None) -> 
             day = created.astimezone(ZoneInfo(tz)).strftime("%Y%m%d")
             counters[day] = counters.get(day, 0) + 1
             n = c.execute("SELECT COUNT(*) FROM ticket WHERE id LIKE ?", (f"TK-{day}%",)).fetchone()[0] + 1
-            code = f"TK-{day}{n:04d}"  # TK-YYYYMMDDXXXX
+            code = f"TK-{day}-{n:04d}"  # TK-YYYYMMDD-XXXX
             status, updated = "Mới", created
             for new, _, hrs in steps:
                 status, updated = new, created + timedelta(hours=hrs)

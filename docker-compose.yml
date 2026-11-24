@@ -19,5 +19,12 @@ services:
     command: ["python", "-m", "scripts.init_data"]
     volumes:
       - resolveai_data:/var/lib/resolveai
+  backup:
+    build: .
+    env_file: .env
+    command: ["python", "-m", "scripts.backup", "--loop"]
+    volumes:
+      - resolveai_data:/var/lib/resolveai
+    restart: unless-stopped
 volumes:
   resolveai_data:

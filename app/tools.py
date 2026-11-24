@@ -24,7 +24,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
      "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "maxLength": 300}},
                      "required": ["query"], "additionalProperties": False}},
     {"name": "lookup_order",
-     "description": "Tra cứu đơn (mã SVN...) trên Mock Order DB hoặc Ticket (mã TK-YYYYMMDDXXXX). Bắt buộc có mã và 4 số cuối số điện thoại hoặc email đã đăng ký; sai 3 lần thì chuyển nhân viên.",
+     "description": "Tra cứu đơn (mã SVN...) trên Mock Order DB hoặc Ticket (mã TK-YYYYMMDD-XXXX). Bắt buộc có mã và 4 số cuối số điện thoại hoặc email đã đăng ký; sai 3 lần thì chuyển nhân viên.",
      "inputSchema": {"type": "object", "properties": {
          "order_id": {"type": "string", "maxLength": 20}, "phone_last4": {"type": "string", "maxLength": 4},
          "email": {"type": "string", "maxLength": 100}}, "required": ["order_id"], "additionalProperties": False}},
@@ -57,6 +57,7 @@ class Turn:
     ticket: dict[str, Any] | None = None                      # Ticket được đề nghị
     handoff: str | None = None                                # mã Handoff được đề nghị
     log: list[dict[str, Any]] = field(default_factory=list)   # (tên, kết quả ngắn) cho trace
+    usage: dict[str, int] = field(default_factory=lambda: {"input_tokens": 0, "output_tokens": 0})
 
 
 def gemini_declarations() -> list[dict[str, Any]]:
@@ -138,9 +139,10 @@ class ToolRegistry:
     def _lookup_order(self, args: dict, turn: Turn, raw_input: str) -> dict:
         turn.order_checked = True
         order_id = args["order_id"].strip().upper()
-        is_ticket = bool(self._ticket) and bool(re.fullmatch(r"TK-?\d{12}", order_id))
+        is_ticket = bool(self._ticket) and bool(re.fullmatch(r"TK-?\d{8}-?\d{4}", order_id))
         if is_ticket:
-            order_id = "TK-" + re.sub(r"\D", "", order_id)
+            digits = re.sub(r"\D", "", order_id)
+            order_id = f"TK-{digits[:8]}-{digits[8:]}"
         phone_last4 = args.get("phone_last4", "").strip()
         email = args.get("email", "").strip()
         if not email:

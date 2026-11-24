@@ -51,3 +51,15 @@ def test_agent_is_reloaded(make, tmp_path):
     svc.kb_create("Tài liệu mới", "nội dung")
     assert A.called == 1
 
+
+def test_update_deactivate_and_text_upload(kbsvc):
+    svc, pdir = kbsvc
+    d = svc.kb_create("Chính sách gốc", "Nội dung v1")
+    updated = svc.kb_update(d["doc_code"], "Chính sách gốc", "Nội dung v2", "policy", "2026-11-24")
+    assert updated["version"] == "1.1" and updated["content"].strip() == "Nội dung v2"
+    assert (pdir / ".history" / "KB-01-v1.0.md").exists()
+    off = svc.kb_deactivate(d["doc_code"])
+    assert off["is_active"] is False
+    uploaded = svc.kb_upload("hoi-dap.txt", "Câu trả lời từ tệp".encode("utf-8"), title="Hỏi đáp")
+    assert uploaded["title"] == "Hỏi đáp" and uploaded["content"].strip() == "Câu trả lời từ tệp"
+

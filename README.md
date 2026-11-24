@@ -47,6 +47,8 @@ GEMINI_API_KEY=<khóa Gemini>
 LLM_MODEL=gemini-3.5-flash-lite
 LLM_FALLBACK_MODEL=
 EMBED_MODEL=gemini-embedding-2
+ADMIN_BOOTSTRAP_USER=admin
+ADMIN_BOOTSTRAP_PASSWORD=<mật khẩu-mạnh>
 ```
 
 Chạy với Docker:
@@ -81,11 +83,24 @@ python -m scripts.run_evals
 
 Kết quả được ghi tại `DATA_DIR/evals/latest.json`; eval không tự chạy khi khởi động.
 
+## Quản trị, KB và vận hành
+
+- `/admin/` yêu cầu đăng nhập nhân viên. Đặt `ADMIN_BOOTSTRAP_USER` và `ADMIN_BOOTSTRAP_PASSWORD` trước khi triển khai; phiên dùng cookie `HttpOnly`, `SameSite=Strict`, có hạn mặc định 8 giờ.
+- Nhân viên có thể thêm, sửa (mỗi lần lưu tăng phiên bản), ngừng hiệu lực và tải lên tài liệu KB dạng PDF/TXT/Markdown. Bản cũ nằm trong `POLICIES_DIR/.history/`; sau mỗi thay đổi Chroma/RAG được nạp lại ngay.
+- Ticket mới theo dạng `TK-YYYYMMDD-XXXX`.
+- Docker Compose chạy tác vụ backup hằng ngày trong service `backup`; dữ liệu SQLite, Chroma và KB được lưu tại `DATA_DIR/backups/`. Mặc định giữ backup 7 ngày, lịch sử Ticket/hội thoại 365 ngày và log kỹ thuật xoay vòng 90 ngày. Có thể đổi bằng các biến `*_RETENTION_DAYS` trong `.env`.
+- Dashboard lưu token đầu vào/đầu ra và ước tính chi phí nếu điền giá model hiện hành qua `LLM_INPUT_COST_PER_MILLION_USD` và `LLM_OUTPUT_COST_PER_MILLION_USD`; log cảnh báo khi vượt `$5/ngày` hoặc `$0.05/hội thoại` (đều cấu hình được).
+
+Đo p95 ở mức 20 request đồng thời (không tạo chi phí Gemini với đường dẫn mặc định):
+
+```bash
+python -m scripts.load_test --base-url http://localhost:8000 --requests 100 --concurrency 20
+```
+
 ## Dữ liệu và giới hạn hiện tại
 
 - Chroma chạy nhúng, lưu ở `DATA_DIR/chroma`; chỉ mục tự tạo lại khi tài liệu chính sách hoặc model embedding thay đổi.
 - Dữ liệu đơn hàng hiện là Mock Order DB, chưa có tích hợp với đơn hàng vận hành thật.
-- Trang `/admin/` và `/api/admin/*` đang mở; khi triển khai thật cần đặt sau lớp xác thực phù hợp.
 - Chỉ dùng một worker, nên rate limit và khóa phiên nằm trong bộ nhớ.
 - Bảng size là thông tin phổ thông; Savani cần xác nhận số đo chính thức trước khi dùng cho tư vấn vận hành.
 - Langfuse là tùy chọn; đặt `LANGFUSE_PUBLIC_KEY` và `LANGFUSE_SECRET_KEY` để bật trace. Thiếu hoặc lỗi Langfuse không làm gián đoạn chat.

@@ -247,12 +247,12 @@ class GeminiAgent:
         for model in models:
             try:
                 data, turn = self._ask(inp, model, turn)
-                return {"output": self._to_output(inp, data, turn)}
+                return {"output": self._to_output(inp, data, turn, model)}
             except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, IndexError, TypeError) as exc:
                 log.warning("Gemini model %s lỗi: %s", model, type(exc).__name__)
                 # Preserve a guarded tool outcome even if final text generation failed.
                 if turn.handoff or turn.ticket or turn.state.get("order_auth_locked"):
-                    return {"output": self._to_output(inp, {}, turn)}
+                    return {"output": self._to_output(inp, {}, turn, model)}
         return {"output": self._unavailable(turn.state)}
 
     @staticmethod
@@ -296,7 +296,7 @@ class GeminiAgent:
         return args
 
     def _request(self, contents: list[dict], *, model: str, tools: bool,
-                 strict_json: bool = False) -> dict:
+                 strict_json: bool = False, usage_counter: dict[str, int] | None = None) -> dict:
         body: dict[str, Any] = {
             "systemInstruction": {"parts": [{"text": self.system_prompt}]},
             "contents": contents,
@@ -314,6 +314,9 @@ class GeminiAgent:
         with span(self.s, "gemini.generate_content", {"model": model, "tools_enabled": tools}) as observation:
             data = self._post_with_retry(API_URL.format(model=model), headers, body)
             usage = data.get("usageMetadata", {})
+            if usage_counter is not None:
+                usage_counter["input_tokens"] = usage_counter.get("input_tokens", 0) + int(usage.get("promptTokenCount") or 0)
+                usage_counter["output_tokens"] = usage_counter.get("output_tokens", 0) + int(usage.get("candidatesTokenCount") or 0)
             log.info("Gemini usage model=%s input_tokens=%s output_tokens=%s",
                      model, usage.get("promptTokenCount"), usage.get("candidatesTokenCount"))
             if observation and usage:
@@ -348,7 +351,7 @@ class GeminiAgent:
 
 
         for _ in range(MAX_TOOL_CALLS + 1):
-            resp = self._request(contents, model=model, tools=True)
+            resp = self._request(contents, model=model, tools=True, usage_counter=turn.usage)
             candidate = resp["candidates"][0]
             model_content = candidate["content"]
             parts = model_content.get("parts", [])
@@ -360,7 +363,8 @@ class GeminiAgent:
                     return data, turn
                 # Tool use and constrained JSON output are separate requests. This final
                 # pass sees the full tool transcript and enforces the output contract.
-                final = self._request(contents + [model_content], model=model, tools=False, strict_json=True)
+                final = self._request(contents + [model_content], model=model, tools=False, strict_json=True,
+                                      usage_counter=turn.usage)
                 final_text = final["candidates"][0]["content"]["parts"][0]["text"]
                 data = self._parse_json(final_text)
                 if data is None:
@@ -383,7 +387,7 @@ class GeminiAgent:
             if turn.calls >= MAX_TOOL_CALLS:
                 break
 
-        final = self._request(contents, model=model, tools=False, strict_json=True)
+        final = self._request(contents, model=model, tools=False, strict_json=True, usage_counter=turn.usage)
         text = final["candidates"][0]["content"]["parts"][0]["text"]
         data = self._parse_json(text)
         if data is None:
@@ -413,7 +417,7 @@ class GeminiAgent:
         v = data.get("llm_confidence")
         return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 1 else 0.0
 
-    def _to_output(self, inp: AgentInput, data: dict[str, Any], turn: Turn) -> AgentOutput:
+    def _to_output(self, inp: AgentInput, data: dict[str, Any], turn: Turn, model: str) -> AgentOutput:
         state = dict(turn.state)
         decision = data.get("decision")
         reply = guard_output(str(data.get("reply") or "").strip()[:1500])
@@ -428,7 +432,8 @@ class GeminiAgent:
                  if (c in self.by_code or c in ("MOCK-ORDER", "TICKET")) and c in retrieved_scores]
         codes = [c for c in codes if c in ("MOCK-ORDER", "TICKET") or retrieved_scores[c] >= self.s.rag_handoff_threshold]
         sources = [self._source(c) for c in codes]
-        trace = {"tools": turn.log, "confidence": self._confidence(data), "decision": decision}
+        trace = {"tools": turn.log, "confidence": self._confidence(data), "decision": decision,
+                 "model": model, "usage": dict(turn.usage)}
 
         def handoff(code: str | None = None, text: str | None = None) -> AgentOutput:
             reason = code or ("HO-04" if intent == "Khiếu nại" else "HO-01")
@@ -468,7 +473,7 @@ class GeminiAgent:
             if merged:
                 state.update(draft=merged, flow="ticket", awaiting_confirm=False)
             self._remember(state, inp.text, reply)
-            return AgentOutput(reply or "Bạn bổ sung thông tin còn thiếu cho yêu cầu nhé.", state, intent=intent)
+            return AgentOutput(reply or "Bạn bổ sung thông tin còn thiếu cho yêu cầu nhé.", state, intent=intent, meta=trace)
         if decision == "handoff" or not reply:
             return handoff()
         if decision == "clarify":

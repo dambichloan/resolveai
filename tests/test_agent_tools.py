@@ -169,7 +169,7 @@ def _seed_ticket(tmp_path):
     conn = sqlite3.connect(tmp_path / "app.db")
     conn.execute("PRAGMA foreign_keys=OFF")
     conn.execute("INSERT INTO ticket(id, session_id, type, status, customer_name, contact, order_id, product, description,"
-                 " created_at, updated_at) VALUES ('TK-202611230001','s1','Đổi trả','Đang xử lý','Lan','0912345678',"
+                 " created_at, updated_at) VALUES ('TK-20261123-0001','s1','Đổi trả','Đang xử lý','Lan','0912345678',"
                  "'SVN1002','Quần','Chật','2026-11-23','2026-11-23')")
     conn.commit()
     conn.close()
@@ -177,22 +177,22 @@ def _seed_ticket(tmp_path):
 
 def test_ticket_lookup_needs_matching_phone_and_hides_private_fields(tmp_path):
     _seed_ticket(tmp_path)
-    ok = make(tmp_path, [call("lookup_order", order_id="TK-202611230001", phone_last4="5678"),
-                         text(decision="answer", reply="Ticket TK-202611230001 đang xử lý.", sources=["TICKET"],
+    ok = make(tmp_path, [call("lookup_order", order_id="TK-20261123-0001", phone_last4="5678"),
+                         text(decision="answer", reply="Ticket TK-20261123-0001 đang xử lý.", sources=["TICKET"],
                               llm_confidence=0.9)])
-    out = turn(ok, "tra ticket TK-202611230001 sdt đuôi 5678")
+    out = turn(ok, "tra ticket TK-20261123-0001 sdt đuôi 5678")
     assert out.handoff_reason is None and out.sources[0]["title"].startswith("Ticket")
     bad = make(tmp_path, [])
-    assert bad._lookup_ticket("TK-202611230001", "0000") is None
-    assert bad._lookup_ticket("TK-202611239999", "5678") is None
-    view = bad._lookup_ticket("TK-202611230001", "5678")
+    assert bad._lookup_ticket("TK-20261123-0001", "0000") is None
+    assert bad._lookup_ticket("TK-20261123-9999", "5678") is None
+    view = bad._lookup_ticket("TK-20261123-0001", "5678")
     assert view["status"] == "Đang xử lý" and "contact" not in view and "description" not in view
 
 
 def test_third_wrong_ticket_or_order_check_hands_off(tmp_path):
     _seed_ticket(tmp_path)
     state, outs = {}, []
-    for code in ("TK-202611230001", "SVN1001", "TK-202611230001"):     # tính chung cho đơn và Ticket
+    for code in ("TK-20261123-0001", "SVN1001", "TK-20261123-0001"):     # tính chung cho đơn và Ticket
         a = make(tmp_path, [call("lookup_order", order_id=code, phone_last4="0000"),
                             text(decision="answer", reply="x", llm_confidence=0.9)])
         out = turn(a, f"{code} 0000", state)
