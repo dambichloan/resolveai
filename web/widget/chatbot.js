@@ -15,7 +15,13 @@
   var FILE_MODE = location.protocol === "file:";
   var STATUS_TEXT = { AI_Handling: "Trợ lý Savani", Waiting_Agent: "Đang chờ nhân viên", Agent_Handling: "Nhân viên đang hỗ trợ", Closed: "Đã kết thúc" };
   var ROLE_NAME = { ai: "Trợ lý Savani", staff: "Nhân viên CSKH" };
-  var CHIPS = ["Tư vấn size giúp mình", "Chính sách đổi hàng", "Tra cứu đơn hàng", "Khuyến mãi Black Friday"];
+  var CHIPS = [
+    { text: "Tư vấn size giúp mình" },
+    { text: "Chính sách đổi hàng", action: "policy_return" },
+    { text: "Chính sách bảo hành", action: "policy_warranty" },
+    { text: "Tra cứu đơn hàng" },
+    { text: "Gặp nhân viên", action: "request_handoff" }
+  ];
   var BOT = '<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="23" fill="#fff"/><path d="M24 7v5" stroke="#d4141c" stroke-width="3" stroke-linecap="round"/><circle cx="24" cy="6" r="3" fill="#d4141c"/><rect x="9" y="12" width="30" height="24" rx="10" fill="#141414"/><circle cx="18" cy="23" r="3.4" fill="#fff"/><circle cx="30" cy="23" r="3.4" fill="#fff"/><path d="M18 30c2 2.2 10 2.2 12 0" stroke="#d4141c" stroke-width="2.6" fill="none" stroke-linecap="round"/><rect x="5" y="19" width="4" height="9" rx="2" fill="#d4141c"/><rect x="39" y="19" width="4" height="9" rx="2" fill="#d4141c"/></svg>';
 
   var sid = null, token = null, lastId = 0, sending = false, poll = null, shown = {}, chatStarted = false;
@@ -43,7 +49,7 @@
   var restart = el("button", "svc-restart", "Bắt đầu cuộc trò chuyện mới"); restart.type = "button"; restart.hidden = true;
   [head, note, log, chips, banner, form, restart].forEach(function (n) { panel.appendChild(n); });
   root.appendChild(panel); root.appendChild(tip); root.appendChild(fab);
-  CHIPS.forEach(function (c) { var b = el("button", null, c); b.type = "button"; b.addEventListener("click", function () { send(c); }); chips.appendChild(b); });
+  CHIPS.forEach(function (c) { var b = el("button", null, c.text); b.type = "button"; b.addEventListener("click", function () { send(c.text, c.action); }); chips.appendChild(b); });
 
   function showBanner(t) { banner.textContent = t; banner.hidden = !t; }
   function scroll() { log.scrollTop = log.scrollHeight; }
