@@ -38,6 +38,10 @@ ORDER_FAIL_MSG = ("Mình chưa xác thực được thông tin này. Bạn kiể
                   "thoại (hoặc email) đã đăng ký, rồi gửi lại giúp mình nhé.")
 MAX_HIST = 6
 MAX_HIST_CHARS = 400
+QUICK_POLICY_DOCS = {
+    "policy_return": "KB-01",
+    "policy_warranty": "KB-02",
+}
 
 
 class _WorkflowState(TypedDict, total=False):
@@ -217,6 +221,25 @@ class GeminiAgent:
         if not inp.action:
             return {}
         state = copy.deepcopy(inp.state)
+        if inp.action == "request_handoff":
+            # This button is an explicit customer request, not a question for the model.
+            return {"output": AgentOutput("Mình đã chuyển bạn tới nhân viên CSKH để hỗ trợ.", state,
+                                           intent=state.get("intent") or "Tư vấn", handoff_reason="HO-03")}
+        doc_code = QUICK_POLICY_DOCS.get(inp.action)
+        if doc_code:
+            # Quick policy buttons must always use their selected KB document.  This
+            # avoids leaving a tool decision to the model and keeps answers stable.
+            doc = self.by_code.get(doc_code)
+            if not doc or not doc.get("is_active"):
+                return {"output": AgentOutput(NO_INFO, state, intent="Tư vấn", handoff_reason="HO-01")}
+            # The document body starts with a Markdown title; the chip already
+            # names that title, so omit it in the chat reply.
+            reply = re.sub(r"^#\s+[^\n]+\n*", "", str(doc.get("content") or "").strip()).strip()[:1500]
+            self._remember(state, inp.text, reply)
+            return {"output": AgentOutput(reply, state, sources=[self._source(doc_code)], intent="Tư vấn",
+                                           meta={"tools": [{"tool": "selected_kb", "ok": True}],
+                                                 "confidence": 1.0, "decision": "answer",
+                                                 "quick_action": inp.action})}
         draft = state.get("draft", {})
         if inp.action == "reject_ticket":
             state["awaiting_confirm"] = False

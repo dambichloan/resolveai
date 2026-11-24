@@ -77,6 +77,23 @@ def test_missing_draft_fields_cannot_be_confirmed(tmp_path):
     assert out.create_ticket is None
 
 
+def test_quick_policy_actions_use_selected_kb_without_model_call(tmp_path):
+    a = make(tmp_path)
+    out = run(a, "Chính sách đổi trả", action="policy_return")
+    assert out.handoff_reason is None
+    assert out.sources[0]["title"].endswith("(KB-01)")
+    assert "7 ngày" in out.reply
+    assert not a.requests
+
+
+def test_request_handoff_action_skips_model_and_uses_handoff_reason(tmp_path):
+    a = make(tmp_path)
+    out = run(a, "Gặp nhân viên", action="request_handoff")
+    assert out.handoff_reason == "HO-03"
+    assert "đã chuyển" in out.reply
+    assert not a.requests
+
+
 def test_size_multiple_questions_use_gemini_and_kb(tmp_path):
     a = make(tmp_path)
     a.retriever.search = lambda query: [

@@ -127,6 +127,15 @@ def test_handoff_e2e(svc):
     assert e.value.status == 409 and e.value.code == "session_closed"
 
 
+def test_explicit_handoff_action_does_not_wait_for_the_model(svc):
+    sid, tok, _ = start(svc)
+    calls = len(svc.agent.requests)
+    r = say(svc, sid, tok, "Gặp nhân viên", action="request_handoff")
+    assert r["status"] == "Waiting_Agent"
+    assert "đã chuyển" in last(r)["text"]
+    assert len(svc.agent.requests) == calls
+
+
 def test_claim_race(svc):
     sid, _, _ = to_handoff(svc)
     st = staff(svc)
