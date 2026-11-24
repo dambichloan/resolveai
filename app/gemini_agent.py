@@ -473,14 +473,12 @@ class GeminiAgent:
                 self._remember(state, inp.text, reply)
                 return AgentOutput(reply, state, intent=intent or "Tư vấn", meta=trace)
         if decision == "collect":
+            # Dùng cả khi tư vấn size (chưa có Ticket): ticket_draft có thể thiếu hoặc rỗng, đó không phải lỗi.
             draft = data.get("ticket_draft")
-            if not isinstance(draft, dict):
-                return self._unavailable(state)
-            draft = self._restore_contact(draft, state)
+            draft = self._restore_contact(draft, state) if isinstance(draft, dict) else {}
             fields = SPEC_BY_NAME["create_ticket"]["inputSchema"]["properties"]
-            if any(k not in fields or not isinstance(v, str) or len(v) > fields[k].get("maxLength", 500)
-                   for k, v in draft.items()):
-                return self._unavailable(state)
+            draft = {k: v.strip() for k, v in draft.items()
+                     if k in fields and isinstance(v, str) and v.strip() and len(v) <= fields[k].get("maxLength", 500)}
             merged = dict(state.get("draft", {}))
             merged.update(draft)
             state["clarify_count"] = 0
