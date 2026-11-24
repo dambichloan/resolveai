@@ -14,7 +14,7 @@ from typing import Any, Protocol
 class AgentInput:
     session_id: str
     text: str
-    action: str | None            # "confirm_ticket" | "reject_ticket" | None
+    action: str | None            # structured customer action, if one was clicked
     state: dict[str, Any]         # trạng thái Agent của phiên (lưu ở chat_session.state_json)
     in_business_hours: bool
 
