@@ -17,6 +17,8 @@ import math
 import threading
 import time
 import uuid
+from io import BytesIO
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -35,7 +37,7 @@ log = logging.getLogger("resolveai")
 CUSTOMER_ACTIONS = {"confirm_ticket", "reject_ticket"}
 ACTION_LABELS = {"confirm_ticket": "Xác nhận yêu cầu", "reject_ticket": "Chỉnh sửa yêu cầu"}
 TICKET_FLOW = ["Mới", "Đang xử lý", "Đã hoàn thành"]
-TICKET_CODE_RE = r"^TK-\d{8}\d{4}$"  # BR5: TK-YYYYMMDDXXXX (không có dấu gạch giữa ngày và số thứ tự)
+TICKET_CODE_RE = r"^TK-\d{8}-\d{4}$"  # BR5: TK-YYYYMMDD-XXXX
 TICKETS_NEED_ORDER = {"Đổi trả", "Bảo hành"}
 SLA_IN_HOURS = "Nhân viên sẽ phản hồi bạn trong vòng 15 phút."
 SLA_OUT_HOURS = ("Hiện đang ngoài giờ làm việc (08:00-17:30, Thứ Hai đến Thứ Bảy). "
@@ -216,9 +218,9 @@ class ChatService:
             self._ticket(session_id, inp, out, latency)
         elif out.handoff_reason:
             self._handoff(session_id, out.intent or state.get("intent"), out.handoff_reason, out.state,
-                          lead=out.reply, sources=out.sources, latency=latency)
+                          lead=out.reply, sources=out.sources, latency=latency, meta=out.meta)
         else:
-            self._finish(session_id, out.state, out.intent, out.reply, out.sources, out.ui, latency)
+            self._finish(session_id, out.state, out.intent, out.reply, out.sources, out.ui, latency, meta=out.meta)
         return self._payload(session_id, cust_id, new_token)
 
     def _run_agent(self, inp: AgentInput) -> tuple[AgentOutput | None, Exception | None]:
@@ -246,11 +248,37 @@ class ChatService:
         raise last  # type: ignore[misc]
 
     def _finish(self, session_id: str, state: dict, intent: str | None, reply: str, sources, ui,
-                latency: int | None, role: str = "ai") -> None:
+                latency: int | None, role: str = "ai", meta: dict | None = None) -> None:
         with self.db.tx() as c:
             c.execute("UPDATE chat_session SET state_json=?, intent=COALESCE(?, intent) WHERE id=?",
                       (json.dumps(state, ensure_ascii=False), intent, session_id))
             self._add_message(c, session_id, role, reply, sources=sources, ui=ui, latency_ms=latency)
+            self._record_usage(c, session_id, meta or {})
+
+    def _record_usage(self, c, session_id: str, meta: dict) -> None:
+        usage = meta.get("usage") if isinstance(meta, dict) else None
+        if not isinstance(usage, dict):
+            return
+        try:
+            input_tokens = max(0, int(usage.get("input_tokens") or 0))
+            output_tokens = max(0, int(usage.get("output_tokens") or 0))
+        except (TypeError, ValueError):
+            return
+        if not input_tokens and not output_tokens:
+            return
+        model = str(meta.get("model") or self.s.llm_model)[:120]
+        cost = ((input_tokens * self.s.llm_input_cost_per_million_usd) +
+                (output_tokens * self.s.llm_output_cost_per_million_usd)) / 1_000_000
+        now = _iso(self.now())
+        c.execute("INSERT INTO usage_event(session_id, model, input_tokens, output_tokens, estimated_cost_usd, created_at) "
+                  "VALUES (?,?,?,?,?,?)", (session_id, model, input_tokens, output_tokens, cost, now))
+        if cost >= self.s.cost_alert_per_conversation_usd > 0:
+            log.warning("Cảnh báo chi phí hội thoại: session=%s estimated_usd=%.4f", session_id[:8], cost)
+        day = now[:10]
+        daily = c.execute("SELECT COALESCE(SUM(estimated_cost_usd),0) FROM usage_event WHERE created_at>=?",
+                          (day,)).fetchone()[0]
+        if daily >= self.s.cost_alert_daily_usd > 0 and daily - cost < self.s.cost_alert_daily_usd:
+            log.warning("Cảnh báo chi phí ngày: estimated_usd=%.4f threshold=%.4f", daily, self.s.cost_alert_daily_usd)
 
     def _fail_message(self, session_id: str, ui=None, latency: int | None = None) -> None:
         text = ("Xin lỗi, hệ thống chưa thể hoàn tất thao tác này. Vui lòng thử lại sau ít phút hoặc liên hệ "
@@ -271,7 +299,7 @@ class ChatService:
                       " VALUES (?,?,?,?,?)", (session_id, reason, intent, int(hours), now))
 
     def _handoff(self, session_id: str, intent: str | None, reason: str, state: dict, *, lead: str,
-                 sources, latency: int | None) -> None:
+                 sources, latency: int | None, meta: dict | None = None) -> None:
         hours = self._hours()
         try:
             self._with_retries(lambda: self._handoff_write(session_id, intent, reason, hours))
@@ -282,7 +310,7 @@ class ChatService:
         # Chỉ thông báo SAU khi ghi hàng đợi thành công (FR-COM-10, NFR-REL-01)
         notice = (lead.strip() + "\n" if lead.strip() else "") + (SLA_IN_HOURS if hours else SLA_OUT_HOURS)
         self._finish(session_id, state, None, notice, sources,
-                     {"type": "handoff_notice", "in_business_hours": hours}, latency)
+                     {"type": "handoff_notice", "in_business_hours": hours}, latency, meta=meta)
 
     # ---------------------------------------------------------------- Ticket
     def _ticket(self, session_id: str, inp: AgentInput, out: AgentOutput, latency: int) -> None:
@@ -315,7 +343,7 @@ class ChatService:
             msg = (f"Mình đã ghi nhận yêu cầu của bạn với mã {code}. Nhân viên CSKH sẽ xem xét và liên hệ "
                    "với bạn. Lưu ý: mình chỉ ghi nhận, không xác nhận đổi hàng, bảo hành hay hoàn tiền.")
         self._finish(session_id, out.state, out.intent, msg, [],
-                     {"type": "ticket_created", "code": code, "deduplicated": deduped}, latency)
+                     {"type": "ticket_created", "code": code, "deduplicated": deduped}, latency, meta=out.meta)
 
     def _ticket_write(self, session_id: str, req: dict) -> tuple[str, bool]:
         now_dt = self.now()
@@ -330,7 +358,7 @@ class ChatService:
                     return dup["id"], True
             day = now_dt.astimezone(ZoneInfo(self.s.timezone)).strftime("%Y%m%d")
             n = c.execute("SELECT COUNT(*) FROM ticket WHERE id LIKE ?", (f"TK-{day}%",)).fetchone()[0] + 1
-            code = f"TK-{day}{n:04d}"  # TK-YYYYMMDDXXXX
+            code = f"TK-{day}-{n:04d}"  # TK-YYYYMMDD-XXXX
             c.execute("INSERT INTO ticket(id, session_id, type, customer_name, contact, order_id, product,"
                       " description, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                       (code, session_id, req["type"], req["customer_name"], req["contact"], req.get("order_id"),
@@ -341,21 +369,56 @@ class ChatService:
 
     # ================================================================ nhân viên
     def ensure_bootstrap_admin(self) -> None:
-        """Trang quản trị không còn đăng nhập: tạo sẵn một tài khoản nhân viên mặc định để gắn vào
-        thao tác (tiếp nhận phiên, đổi trạng thái Ticket). Mật khẩu '!' = không thể đăng nhập."""
+        """Khởi tạo tài khoản quản trị từ biến môi trường, không có mật khẩu mặc định."""
+        username = (self.s.admin_user or "").strip()
+        password = self.s.admin_password or ""
+        if not username or not password:
+            return
         with self.db.tx() as c:
-            if c.execute("SELECT COUNT(*) FROM staff").fetchone()[0] == 0:
+            row = c.execute("SELECT id, password_hash FROM staff WHERE username=?", (username,)).fetchone()
+            if row is None:
                 c.execute("INSERT INTO staff(username, password_hash, created_at) VALUES (?,?,?)",
-                          (self.s.admin_user or "nhanvien", "!", _iso(self.now())))
+                          (username, security.hash_password(password), _iso(self.now())))
+            elif row["password_hash"] == "!":
+                # Nâng cấp DB của bản cũ vốn tạo nhân viên không thể đăng nhập.
+                c.execute("UPDATE staff SET password_hash=? WHERE id=?",
+                          (security.hash_password(password), row["id"]))
+
+    def login_staff(self, username: str | None, password: str | None) -> dict:
+        username = (username or "").strip()
+        password = password or ""
+        if not username or not password:
+            raise ApiError(422, "missing_credentials", "Cần nhập tên đăng nhập và mật khẩu.")
+        now = self.now()
+        with self.db.tx() as c:
+            c.execute("DELETE FROM staff_session WHERE expires_at<=?", (_iso(now),))
+            row = c.execute("SELECT id, username, password_hash FROM staff WHERE username=?", (username,)).fetchone()
+            if row is None or not security.check_password(password, row["password_hash"]):
+                raise ApiError(401, "invalid_credentials", "Tên đăng nhập hoặc mật khẩu không đúng.")
+            token = security.new_token()
+            expires = now + timedelta(hours=max(1, self.s.staff_session_hours))
+            c.execute("INSERT INTO staff_session(token_hash, staff_id, expires_at) VALUES (?,?,?)",
+                      (security.hash_token(token, self.s.secret_key), row["id"], _iso(expires)))
+        return {"id": row["id"], "username": row["username"], "token": token, "expires_at": _iso(expires)}
+
+    def logout_staff(self, token: str | None) -> None:
+        if not token:
+            return
+        with self.db.tx() as c:
+            c.execute("DELETE FROM staff_session WHERE token_hash=?", (security.hash_token(token, self.s.secret_key),))
 
     def require_staff(self, token: str | None = None) -> dict:
-        """Không kiểm tra đăng nhập (theo yêu cầu): luôn trả về nhân viên mặc định."""
-        with self.db.conn() as c:
-            row = c.execute("SELECT id, username FROM staff ORDER BY id LIMIT 1").fetchone()
-        if not row:
-            self.ensure_bootstrap_admin()
-            return self.require_staff()
-        return {"id": row["id"], "username": row["username"]}
+        if not token:
+            raise ApiError(401, "staff_auth_required", "Bạn cần đăng nhập trang quản trị.")
+        now = self.now()
+        token_hash = security.hash_token(token, self.s.secret_key)
+        with self.db.tx() as c:
+            c.execute("DELETE FROM staff_session WHERE expires_at<=?", (_iso(now),))
+            row = c.execute("SELECT s.id, s.username, ss.expires_at FROM staff_session ss "
+                            "JOIN staff s ON s.id=ss.staff_id WHERE ss.token_hash=?", (token_hash,)).fetchone()
+        if row is None:
+            raise ApiError(401, "staff_auth_required", "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.")
+        return {"id": row["id"], "username": row["username"], "expires_at": row["expires_at"]}
 
     def queue(self) -> list[dict]:
         with self.db.conn() as c:
@@ -497,12 +560,15 @@ class ChatService:
                 (lo, hi))}
             lat = c.execute("SELECT AVG(latency_ms) FROM message WHERE role='ai' AND latency_ms IS NOT NULL"
                             " AND created_at>=? AND created_at<=?", (lo, hi)).fetchone()[0]
+            cost = c.execute("SELECT COALESCE(SUM(estimated_cost_usd),0) FROM usage_event WHERE created_at>=? "
+                             "AND created_at<=?", (lo, hi)).fetchone()[0]
         return {"total_sessions": total, "ai_self_resolved_rate": round(ai_only / total, 3) if total else None,
                 "intent_distribution": intents,
                 "tickets_by_status": {s: tickets.get(s, 0) for s in TICKET_FLOW},
-                "avg_latency_ms": round(lat) if lat is not None else None}
+                "avg_latency_ms": round(lat) if lat is not None else None,
+                "estimated_cost_usd": round(float(cost), 6)}
 
-    # ---- Kho tài liệu KB (data/policies): xem và thêm mới; sửa/xóa chưa làm
+    # ---- Kho tài liệu KB: phiên bản hiện hành ở policies/, lịch sử ở .history/
     def kb_list(self) -> list[dict]:
         return [{k: v for k, v in d.items() if k != "content"} for d in kb.load_docs(self.s.policies_dir)]
 
@@ -512,13 +578,13 @@ class ChatService:
                 return d
         raise ApiError(404, "not_found", "Không tìm thấy tài liệu.")
 
-    # ---- Thêm tài liệu KB thủ công (FR-ADM-02): ghi file .md có front matter vào data/policies
+    # ---- Quản lý KB (FR-ADM-02): Markdown hiện hành có front matter; bản cũ được lưu lịch sử.
     KB_TYPES = ("policy", "faq")
     KB_MAX_TITLE, KB_MAX_CONTENT = 200, 20000
 
-    def kb_create(self, title: str | None, content: str | None, doc_type: str | None = None,
-                  effective_date: str | None = None) -> dict:
-        title = " ".join((title or "").split())          # gộp xuống dòng để không phá front matter
+    def _kb_validate(self, title: str | None, content: str | None, doc_type: str | None,
+                     effective_date: str | None) -> tuple[str, str, str, str]:
+        title = " ".join((title or "").split())
         content = (content or "").replace("\r\n", "\n").strip()
         doc_type = (doc_type or "policy").strip()
         if not title or not content:
@@ -533,6 +599,40 @@ class ChatService:
             eff = datetime.strptime(effective_date, "%Y-%m-%d").date() if effective_date else today
         except ValueError:
             raise ApiError(422, "bad_date", "Ngày hiệu lực phải có dạng YYYY-MM-DD.") from None
+        return title, content, doc_type, eff.isoformat()
+
+    @staticmethod
+    def _next_version(value: object) -> str:
+        try:
+            return f"{float(str(value or '1.0')) + 0.1:.1f}"
+        except ValueError:
+            return "1.1"
+
+    @staticmethod
+    def _doc_text(code: str, title: str, content: str, doc_type: str, version: str,
+                  effective_date: str, active: bool, source_file: str) -> str:
+        return (f"---\ndoc_code: {code}\ntitle: {title}\ndoc_type: {doc_type}\nversion: {version}\n"
+                f"effective_date: {effective_date}\nis_active: {'true' if active else 'false'}\n"
+                f"source_file: {source_file}\n---\n\n{content}\n")
+
+    def _kb_path(self, doc: dict) -> Any:
+        filename = str(doc.get("source_file") or "")
+        path = (self.s.policies_dir / filename).resolve()
+        if path.parent != self.s.policies_dir.resolve() or path.suffix.lower() != ".md":
+            raise ApiError(409, "invalid_doc_source", "Tệp nguồn của tài liệu không hợp lệ.")
+        return path
+
+    def _kb_reload(self, code: str) -> None:
+        reload_kb = getattr(self.agent, "reload_kb", None)
+        if reload_kb:
+            try:
+                reload_kb()
+            except Exception:  # noqa: BLE001
+                log.warning("Agent chưa nạp lại được kho tài liệu: %s", code)
+
+    def kb_create(self, title: str | None, content: str | None, doc_type: str | None = None,
+                  effective_date: str | None = None) -> dict:
+        title, content, doc_type, eff = self._kb_validate(title, content, doc_type, effective_date)
         with self._kb_lock:                                # tránh hai người thêm cùng lúc trùng mã
             pdir = self.s.policies_dir
             pdir.mkdir(parents=True, exist_ok=True)
@@ -545,19 +645,82 @@ class ChatService:
             n = 2
             while (pdir / fname).exists():
                 fname = f"{_slug(title)}-{n}.md"; n += 1
-            text = (f"---\ndoc_code: {code}\ntitle: {title}\ndoc_type: {doc_type}\nversion: 1.0\n"
-                    f"effective_date: {eff.isoformat()}\nis_active: true\nsource_file: {fname}\n---\n\n"
-                    f"{content}\n")
+            text = self._doc_text(code, title, content, doc_type, "1.0", eff, True, fname)
             tmp = pdir / (fname + ".tmp")
             tmp.write_text(text, encoding="utf-8")
             tmp.replace(pdir / fname)                      # ghi nguyên tử, không để lại file dở
-        reload_kb = getattr(self.agent, "reload_kb", None)
-        if reload_kb:                                      # Agent đọc lại kho để dùng ngay, không cần khởi động lại
-            try:
-                reload_kb()
-            except Exception:  # noqa: BLE001
-                log.warning("Agent chưa nạp lại được kho tài liệu: %s", code)
+        self._kb_reload(code)
         return self.kb_get(code)
 
-    def kb_not_implemented(self):
-        raise ApiError(501, "not_implemented", "Sửa và xóa tài liệu KB chưa được hiện thực.")
+    def kb_upload(self, filename: str | None, payload: bytes, title: str | None = None,
+                  doc_type: str | None = None, effective_date: str | None = None) -> dict:
+        """Nhận PDF/TXT/Markdown, trích phần chữ rồi lưu thành tài liệu KB có thể versioning."""
+        name = (filename or "").strip().replace("\\", "/").split("/")[-1]
+        suffix = name[name.rfind("."):].lower() if "." in name else ""
+        if suffix not in {".pdf", ".txt", ".md", ".markdown"}:
+            raise ApiError(422, "unsupported_file", "Chỉ hỗ trợ tệp PDF, TXT hoặc Markdown.")
+        if not payload or len(payload) > 2_000_000:
+            raise ApiError(422, "invalid_file_size", "Tệp phải có nội dung và không vượt quá 2 MB.")
+        if suffix == ".pdf":
+            try:
+                from pypdf import PdfReader
+                text = "\n\n".join((page.extract_text() or "") for page in PdfReader(BytesIO(payload)).pages)
+            except ImportError:
+                raise ApiError(503, "pdf_parser_unavailable", "Máy chủ chưa cài bộ đọc PDF.") from None
+            except Exception:
+                raise ApiError(422, "unreadable_pdf", "Không đọc được phần chữ trong tệp PDF này.") from None
+        else:
+            try:
+                text = payload.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                raise ApiError(422, "invalid_text_encoding", "Tệp TXT/Markdown cần mã hóa UTF-8.") from None
+            # Không để front matter của tệp tải lên lồng vào front matter hệ thống.
+            _, text = kb.parse_doc(text)
+        text = text.strip()
+        if not text:
+            raise ApiError(422, "empty_file", "Không tìm thấy nội dung chữ có thể dùng trong tệp.")
+        inferred_title = Path(name).stem.replace("_", " ").replace("-", " ").strip()
+        return self.kb_create(title or inferred_title, text, doc_type, effective_date)
+
+    def kb_update(self, doc_code: str, title: str | None, content: str | None, doc_type: str | None = None,
+                  effective_date: str | None = None) -> dict:
+        current = self.kb_get(doc_code)
+        title = current["title"] if title is None else title
+        content = current["content"] if content is None else content
+        doc_type = current["doc_type"] if doc_type is None else doc_type
+        effective_date = current["effective_date"] if effective_date is None else effective_date
+        title, content, doc_type, eff = self._kb_validate(title, content, doc_type, effective_date)
+        with self._kb_lock:
+            docs = self.kb_list()
+            if any(d["doc_code"] != doc_code and d["is_active"] and d["title"].strip().lower() == title.lower()
+                   for d in docs):
+                raise ApiError(409, "duplicate_title", "Đã có tài liệu đang hiệu lực với tiêu đề này.")
+            path = self._kb_path(current)
+            history = self.s.policies_dir / ".history"
+            history.mkdir(parents=True, exist_ok=True)
+            archive = history / f"{doc_code}-v{current.get('version') or '1.0'}.md"
+            archive.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+            version = self._next_version(current.get("version"))
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(self._doc_text(doc_code, title, content, doc_type, version, eff, True, path.name), encoding="utf-8")
+            tmp.replace(path)
+        self._kb_reload(doc_code)
+        return self.kb_get(doc_code)
+
+    def kb_deactivate(self, doc_code: str) -> dict:
+        current = self.kb_get(doc_code)
+        if not current["is_active"]:
+            return current
+        with self._kb_lock:
+            path = self._kb_path(current)
+            history = self.s.policies_dir / ".history"
+            history.mkdir(parents=True, exist_ok=True)
+            (history / f"{doc_code}-v{current.get('version') or '1.0'}.md").write_text(
+                path.read_text(encoding="utf-8"), encoding="utf-8")
+            version = self._next_version(current.get("version"))
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(self._doc_text(doc_code, current["title"], current["content"], current["doc_type"],
+                                          version, str(current["effective_date"]), False, path.name), encoding="utf-8")
+            tmp.replace(path)
+        self._kb_reload(doc_code)
+        return self.kb_get(doc_code)

@@ -1,8 +1,8 @@
 """Hợp đồng giữa Backend và Agent Workflow (Mục 20).
 
 Backend KHÔNG tin Agent trong các thao tác ghi: Agent chỉ *đề nghị* tạo Ticket hoặc Handoff,
-Backend kiểm tra điều kiện (Execution/Handoff Guard) rồi mới ghi DB. Để thay StubAgent bằng
-Agent LangGraph thật, hiện thực `run_turn` với đúng chữ ký này và đổi `build_agent()` trong main.py.
+Backend kiểm tra điều kiện (Execution/Handoff Guard) rồi mới ghi DB. GeminiAgent hiện thực
+`run_turn` theo hợp đồng này; Agent không có quyền ghi trực tiếp vào cơ sở dữ liệu.
 """
 from __future__ import annotations
 

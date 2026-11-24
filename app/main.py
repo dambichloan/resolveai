@@ -5,28 +5,27 @@ import logging
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .agent_port import AgentPort
 from .config import Settings, load_settings
 from .db import Database
+from . import kb
+from .operations import configure_technical_log
 from . import observability
 from .service import ApiError, ChatService
-from .stub_agent import StubAgent
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
 def build_agent(settings: Settings) -> AgentPort:
-    """FAKE_LLM=1 dùng StubAgent; FAKE_LLM=0 dùng Gemini với tool calling, cần GEMINI_API_KEY."""
-    if settings.fake_llm:
-        return StubAgent(settings)
+    """Khởi tạo Gemini cho hội thoại và gọi công cụ nghiệp vụ."""
     if not settings.gemini_api_key:
-        raise RuntimeError("FAKE_LLM=0 cần biến môi trường GEMINI_API_KEY (khóa Gemini).")
+        raise RuntimeError("Cần đặt GEMINI_API_KEY để chạy ResolveAI.")
     from .gemini_agent import GeminiAgent
-    return GeminiAgent(settings, fallback=StubAgent(settings))
+    return GeminiAgent(settings)
 
 
 class ChatIn(BaseModel):
@@ -38,6 +37,11 @@ class ChatIn(BaseModel):
 
 class TextIn(BaseModel):
     text: str
+
+
+class LoginIn(BaseModel):
+    username: str | None = None
+    password: str | None = None
 
 
 class KbIn(BaseModel):
@@ -54,6 +58,8 @@ class StatusIn(BaseModel):
 
 def create_app(settings: Settings | None = None, agent: AgentPort | None = None) -> FastAPI:
     settings = settings or load_settings()
+    kb.bootstrap_policies(settings.policies_dir, settings.source_policies_dir)
+    configure_technical_log(settings)
     db = Database(settings.app_db_path)
     db.init()
     logging.getLogger("resolveai").warning("Langfuse: %s", observability.status(settings))
@@ -71,8 +77,8 @@ def create_app(settings: Settings | None = None, agent: AgentPort | None = None)
         body = {"error": {"code": e.code, "message": e.message, **e.extra}}
         return JSONResponse(body, status_code=e.status, headers=e.headers)
 
-    def staff() -> dict:
-        return svc.require_staff()
+    def staff(request: Request) -> dict:
+        return svc.require_staff(request.cookies.get("staff_session"))
 
     # ---------------- khách hàng
     @app.get("/healthz")
@@ -92,6 +98,22 @@ def create_app(settings: Settings | None = None, agent: AgentPort | None = None)
         return svc.get_messages(session_id, x_session_token, after)
 
     # ---------------- nhân viên
+    @app.post("/api/admin/login")
+    def admin_login(body: LoginIn):
+        result = svc.login_staff(body.username, body.password)
+        token = result.pop("token")
+        response = JSONResponse(result)
+        response.set_cookie("staff_session", token, max_age=settings.staff_session_hours * 3600,
+                            httponly=True, samesite="strict", secure=settings.cookie_secure, path="/")
+        return response
+
+    @app.post("/api/admin/logout", status_code=204)
+    def admin_logout(request: Request):
+        svc.logout_staff(request.cookies.get("staff_session"))
+        response = Response(status_code=204)
+        response.delete_cookie("staff_session", path="/")
+        return response
+
     @app.get("/api/admin/me")
     def me(s: dict = Depends(staff)):
         return s
@@ -158,15 +180,29 @@ def create_app(settings: Settings | None = None, agent: AgentPort | None = None)
     def kb_create(body: KbIn, _: dict = Depends(staff)):
         return svc.kb_create(body.title, body.content, body.doc_type, body.effective_date)
 
-    @app.api_route("/api/admin/kb/docs/{doc_code}", methods=["PUT", "DELETE"])
-    def kb_write(doc_code: str, _: dict = Depends(staff)):
-        svc.kb_not_implemented()
+    @app.put("/api/admin/kb/docs/{doc_code}")
+    def kb_update(doc_code: str, body: KbIn, _: dict = Depends(staff)):
+        return svc.kb_update(doc_code, body.title, body.content, body.doc_type, body.effective_date)
+
+    @app.delete("/api/admin/kb/docs/{doc_code}")
+    def kb_delete(doc_code: str, _: dict = Depends(staff)):
+        return svc.kb_deactivate(doc_code)
+
+    @app.post("/api/admin/kb/upload", status_code=201)
+    async def kb_upload(request: Request, filename: str, title: str | None = None,
+                        doc_type: str | None = None, effective_date: str | None = None,
+                        _: dict = Depends(staff)):
+        return svc.kb_upload(filename, await request.body(), title, doc_type, effective_date)
 
     # StaticFiles phục vụ thư mục khi URL có dấu / cuối. Hai redirect này giúp
     # các liên kết /admin và /chat không rơi nhầm vào trang bán hàng.
     @app.get("/admin", include_in_schema=False)
     def admin_root():
         return RedirectResponse("/admin/")
+
+    @app.get("/admin/login", include_in_schema=False)
+    def admin_login_page():
+        return RedirectResponse("/admin/login.html")
 
     @app.get("/chat", include_in_schema=False)
     def chat_root():

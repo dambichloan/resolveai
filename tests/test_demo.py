@@ -1,4 +1,4 @@
-"""Mã Ticket TK-YYYYMMDDXXXX, dữ liệu mẫu cho admin và chính sách KB."""
+"""Mã Ticket TK-YYYYMMDD-XXXX, dữ liệu mẫu cho admin và chính sách KB."""
 import re
 
 from app.demo_seed import seed_demo
@@ -6,8 +6,8 @@ from app.service import TICKET_CODE_RE
 
 
 def test_ticket_code_format(svc):
-    assert re.match(TICKET_CODE_RE, "TK-202611180001")
-    assert not re.match(TICKET_CODE_RE, "TK-20261118-0001")
+    assert re.match(TICKET_CODE_RE, "TK-20261118-0001")
+    assert not re.match(TICKET_CODE_RE, "TK-202611180001")
 
 
 def test_seed_demo_populates_admin_and_is_idempotent(svc):

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from .db import Database
 from .knowledge import DEFAULT_POLICIES
 from .service import ApiError
-from .stub_agent import norm
+from .guardrails import _norm as norm
 
 MAX_TITLE, MAX_CONTENT, MAX_PROMPT_CHARS = 200, 6000, 20000
 STOP = {"cho", "minh", "toi", "ban", "the", "nao", "khong", "duoc", "nay", "voi", "cua", "gia", "shop",

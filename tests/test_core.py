@@ -6,6 +6,7 @@ from app.hours import in_business_hours
 from app.service import ApiError
 from datetime import datetime, timezone
 from tests.conftest import OUT_HOURS
+from tests.gemini_responses import response, tool
 
 
 def say(svc, sid, tok, text=None, action=None, cid=None):
@@ -22,20 +23,29 @@ def last(r):
 
 
 def staff(svc):
-    return svc.require_staff()
+    login = svc.login_staff("admin", "pw12345")
+    return svc.require_staff(login["token"])
 
 
 def to_handoff(svc):
     sid, tok, _ = start(svc)
+    svc.agent.responses.append(tool("handoff_to_agent", reason_code="HO-03"))
     r = say(svc, sid, tok, "cho tôi gặp nhân viên")
     assert r["status"] == "Waiting_Agent"
     return sid, tok, r
 
 
 def fill_ticket(svc):
+    fields = [("type", "Đổi trả"), ("customer_name", "Nguyen Van A"),
+              ("contact", "CONTACT_1"), ("order_id", "SVN001"),
+              ("product", "Áo thun"), ("description", "Sai size")]
+    for key, value in fields[:-1]:
+        svc.agent.responses.append(response(decision="collect", reply="Bạn bổ sung thông tin nhé.",
+                                            ticket_draft={key: value}, intent="Đổi trả"))
+    svc.agent.responses.append(tool("create_ticket", **dict(fields)))
     sid, tok, _ = start(svc, "tôi muốn đổi hàng, tạo yêu cầu")
-    for t in ["Nguyen Van A", "0912345678", "SVN001", "Áo thun", "Sai size"]:
-        r = say(svc, sid, tok, t)
+    for text in ["Nguyen Van A", "0912345678", "SVN001", "Áo thun", "Sai size"]:
+        r = say(svc, sid, tok, text)
     assert last(r)["ui"]["type"] == "ticket_summary"
     return sid, tok
 
@@ -130,6 +140,7 @@ def test_sla_out_of_hours(make, clock):
     clock.t = OUT_HOURS
     s = make()
     sid, tok, _ = start(s)
+    s.agent.responses.append(tool("handoff_to_agent", reason_code="HO-03"))
     r = say(s, sid, tok, "gặp nhân viên")
     assert "2 giờ đầu ca" in last(r)["text"] and "15 phút" not in last(r)["text"]
 
@@ -152,6 +163,7 @@ def test_agent_failure_three_attempts_then_ho08(make):
 def test_handoff_write_failure_shows_hotline_status_unchanged(svc, monkeypatch):
     sid, tok, _ = start(svc)
     monkeypatch.setattr(svc, "_handoff_write", lambda *a: (_ for _ in ()).throw(RuntimeError("db")))
+    svc.agent.responses.append(tool("handoff_to_agent", reason_code="HO-03"))
     r = say(svc, sid, tok, "gặp nhân viên")
     assert r["status"] == "AI_Handling" and "1900-TEST" in last(r)["text"]
     assert svc.queue() == []
@@ -222,24 +234,23 @@ def test_business_hours(y, m, d, h, mi, exp):
     assert in_business_hours(datetime(y, m, d, h, mi, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))) is exp
 
 
-def test_admin_no_login_and_hash(svc):
-    st = svc.require_staff()
+def test_admin_login_and_hash(svc):
+    with pytest.raises(ApiError) as e:
+        svc.require_staff()
+    assert e.value.status == 401
+    with pytest.raises(ApiError) as e:
+        svc.login_staff("admin", "sai")
+    assert e.value.status == 401
+    login = svc.login_staff("admin", "pw12345")
+    st = svc.require_staff(login["token"])
     assert st["username"] == "admin" and st["id"]
-    assert svc.require_staff(None) == st
+    with svc.db.conn() as c:
+        assert login["token"] not in c.execute("SELECT token_hash FROM staff_session").fetchone()[0]
+    svc.logout_staff(login["token"])
+    with pytest.raises(ApiError):
+        svc.require_staff(login["token"])
     h = security.hash_password("abc")
     assert "abc" not in h and security.check_password("abc", h) and not security.check_password("abd", h)
-
-
-def test_size_advice():
-    from app.agent_port import AgentInput
-    from app.stub_agent import StubAgent
-    a, st = StubAgent(), {}
-    for msg in ["tư vấn size giúp mình", "nam", "1m75 70kg"]:
-        o = a.run_turn(AgentInput("s", msg, None, st, True))
-        st = o.state
-    assert "size L" in o.reply and o.sources and "flow" not in st
-    o = a.run_turn(AgentInput("s", "nữ 1m60 48kg size nào", None, {}, True))
-    assert "size M" in o.reply
 
 
 def test_dashboard(svc):

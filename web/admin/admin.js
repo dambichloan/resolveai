@@ -10,7 +10,7 @@
   var HO = { "HO-01": "Không đủ căn cứ trả lời", "HO-03": "Khách yêu cầu gặp nhân viên", "HO-04": "Khách bức xúc / khiếu nại", "HO-06": "Cần quyết định hoàn tiền / bồi thường / ngoại lệ", "HO-07": "Vượt phạm vi xử lý an toàn (xác thực đơn sai nhiều lần)", "HO-08": "Lỗi hệ thống Agent" };
   var HERO = {
     queue: ["Hàng đợi hỗ trợ", "Tiếp nhận các cuộc trò chuyện mà trợ lý AI đã chuyển cho nhân viên."],
-    tickets: ["Ticket", "Yêu cầu đổi trả, bảo hành và khiếu nại đã được ghi nhận. Mã Ticket theo dạng TK-YYYYMMDDXXXX."],
+    tickets: ["Ticket", "Yêu cầu đổi trả, bảo hành và khiếu nại đã được ghi nhận. Mã Ticket theo dạng TK-YYYYMMDD-XXXX."],
     history: ["Lịch sử hội thoại", "Xem lại mọi phiên chat, kể cả phiên AI tự giải quyết."],
     dash: ["Thống kê", "Hiệu quả của trợ lý AI và tình hình xử lý Ticket."],
     kb: ["Tài liệu KB", "Chính sách đổi trả, bảo hành, bảng size và giờ làm việc mà trợ lý AI dùng để trả lời."]
@@ -29,14 +29,25 @@
     return fetch(url, { method: method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined, credentials: "same-origin" })
       .then(function (r) {
         return r.json().catch(function () { return {}; }).then(function (j) {
-          if (!r.ok) { var e = new Error((j.error && j.error.message) || "Lỗi"); e.status = r.status; e.code = j.error && j.error.code; throw e; }
+          if (!r.ok) { var e = new Error((j.error && j.error.message) || "Lỗi"); e.status = r.status; e.code = j.error && j.error.code; if (e.status === 401) location.replace("/admin/login.html"); throw e; }
           return j;
         });
       });
   }
+  function apiRaw(method, url, body) {
+    return fetch(url, { method: method, body: body, credentials: "same-origin" })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) { var e = new Error((j.error && j.error.message) || "Lỗi"); e.status = r.status; if (e.status === 401) location.replace("/admin/login.html"); throw e; }
+        return j;
+      }); });
+  }
   function fail(e) { toast(e.message); }
 
   function stop() { if (timer) { clearInterval(timer); timer = null; } }
+
+  $("logout").addEventListener("click", function () {
+    api("POST", "/api/admin/logout").finally(function () { location.replace("/admin/login.html"); });
+  });
 
   $("tabs").addEventListener("click", function (e) { if (e.target.dataset.tab) setTab(e.target.dataset.tab); });
 
@@ -175,6 +186,7 @@
       stat("Tổng số phiên", d.total_sessions);
       stat("Tỷ lệ AI tự giải quyết", d.ai_self_resolved_rate == null ? "—" : Math.round(d.ai_self_resolved_rate * 100) + "%");
       stat("Độ trễ TB của AI (ms)", d.avg_latency_ms == null ? "—" : d.avg_latency_ms);
+      stat("Chi phí AI ước tính (USD)", d.estimated_cost_usd == null ? "—" : d.estimated_cost_usd.toFixed(4));
       box.appendChild(stats);
       function bars(title, obj, cls) {
         box.appendChild(el("h2", null, title));
@@ -223,7 +235,19 @@
       var box = $("kbDoc"); clear(box);
       var row = el("div", "row"); row.appendChild(pill(d.doc_code, "red")); row.appendChild(pill(d.doc_type)); row.appendChild(el("span", "muted", "v" + d.version + " · hiệu lực từ " + d.effective_date + " · " + d.source_file));
       box.appendChild(row); box.appendChild(renderMd(d.content));
-      box.appendChild(el("p", "muted", "Sửa và xóa tài liệu chưa hiện thực; hiện chỉ thêm mới."));
+      var actions = el("div", "row");
+      var edit = el("button", null, "Sửa và tạo phiên bản mới");
+      edit.addEventListener("click", function () { showKbForm(d); }); actions.appendChild(edit);
+      if (d.is_active) {
+        var disable = el("button", null, "Ngừng hiệu lực");
+        disable.addEventListener("click", function () {
+          if (!confirm("Ngừng hiệu lực tài liệu " + d.doc_code + "? Bản cũ vẫn được lưu lịch sử.")) return;
+          api("DELETE", "/api/admin/kb/docs/" + encodeURIComponent(d.doc_code)).then(function (updated) {
+            toast("Đã ngừng hiệu lực " + updated.doc_code); loadKb(); showKb(updated.doc_code);
+          }).catch(fail);
+        }); actions.appendChild(disable);
+      }
+      box.appendChild(actions);
     }).catch(fail);
   }
 
@@ -231,29 +255,39 @@
     var w = el("label", null); w.style.display = "flex"; w.style.flexDirection = "column"; w.style.gap = "4px";
     w.appendChild(el("span", null, label)); w.appendChild(node); box.appendChild(w); return node;
   }
-  function showKbForm() {
+  function showKbForm(existing) {
     cur.kb = null; loadKb();
-    var box = $("kbDoc"); clear(box); box.appendChild(el("h1", null, "Thêm tài liệu"));
-    box.appendChild(el("p", "muted", "Tài liệu được lưu vào kho chính sách và trợ lý AI dùng ngay cho các câu hỏi sau, không cần khởi động lại. Trong nội dung có thể dùng tiêu đề (## Mục) và gạch đầu dòng (- ý) để chia đoạn."));
+    var box = $("kbDoc"); clear(box); box.appendChild(el("h1", null, existing ? "Sửa tài liệu" : "Thêm tài liệu"));
+    box.appendChild(el("p", "muted", existing ? "Lưu sẽ tạo phiên bản mới; trợ lý AI dùng bản mới ngay." : "Bạn có thể dán nội dung hoặc tải PDF/TXT/Markdown. Tài liệu được nạp vào kho chính sách và trợ lý AI dùng ngay."));
     var form = el("div"); form.style.display = "flex"; form.style.flexDirection = "column"; form.style.gap = "12px"; box.appendChild(form);
-    var title = kbField(form, "Tiêu đề", el("input")); title.maxLength = 200; title.placeholder = "Ví dụ: Chính sách thành viên";
+    var title = kbField(form, "Tiêu đề", el("input")); title.maxLength = 200; title.placeholder = "Ví dụ: Chính sách thành viên"; title.value = existing ? existing.title : "";
     var type = kbField(form, "Loại tài liệu", el("select"));
-    [["policy", "Chính sách"], ["faq", "Câu hỏi thường gặp"]].forEach(function (o) { var op = el("option", null, o[1]); op.value = o[0]; type.appendChild(op); });
-    var date = kbField(form, "Ngày hiệu lực (để trống = hôm nay)", el("input")); date.type = "date";
-    var content = kbField(form, "Nội dung", el("textarea")); content.rows = 14; content.maxLength = 20000; content.placeholder = "Dán hoặc gõ nội dung tài liệu…";
-    var actions = el("div", "row"), save = el("button", "primary", "Lưu tài liệu"), cancel = el("button", null, "Hủy");
+    [["policy", "Chính sách"], ["faq", "Câu hỏi thường gặp"]].forEach(function (o) { var op = el("option", null, o[1]); op.value = o[0]; if (existing && existing.doc_type === o[0]) op.selected = true; type.appendChild(op); });
+    var date = kbField(form, "Ngày hiệu lực (để trống = hôm nay)", el("input")); date.type = "date"; date.value = existing ? existing.effective_date : "";
+    var file = null;
+    if (!existing) { file = kbField(form, "Hoặc tải tệp (PDF, TXT, Markdown; tối đa 2 MB)", el("input")); file.type = "file"; file.accept = ".pdf,.txt,.md,.markdown,application/pdf,text/plain,text/markdown"; }
+    var content = kbField(form, "Nội dung" + (file ? " (bỏ trống nếu đã chọn tệp)" : ""), el("textarea")); content.rows = 14; content.maxLength = 20000; content.placeholder = "Dán hoặc gõ nội dung tài liệu…"; content.value = existing ? existing.content : "";
+    var actions = el("div", "row"), save = el("button", "primary", existing ? "Lưu phiên bản mới" : "Lưu tài liệu"), cancel = el("button", null, "Hủy");
     actions.appendChild(save); actions.appendChild(cancel); form.appendChild(actions);
     cancel.addEventListener("click", function () { clear(box); box.appendChild(el("p", "muted", "Chọn một tài liệu để xem nội dung.")); });
     save.addEventListener("click", function () {
-      if (!title.value.trim() || !content.value.trim()) { toast("Cần nhập cả tiêu đề và nội dung."); return; }
+      if (!title.value.trim() || (!content.value.trim() && !(file && file.files && file.files[0]))) { toast("Cần nhập tiêu đề và nội dung, hoặc chọn tệp."); return; }
       save.disabled = true;
-      api("POST", "/api/admin/kb/docs", { title: title.value, content: content.value, doc_type: type.value, effective_date: date.value || null })
-        .then(function (d) { toast("Đã thêm tài liệu " + d.doc_code); cur.kb = d.doc_code; loadKb(); showKb(d.doc_code); })
+      var body = { title: title.value, content: content.value, doc_type: type.value, effective_date: date.value || null };
+      var request;
+      if (existing) request = api("PUT", "/api/admin/kb/docs/" + encodeURIComponent(existing.doc_code), body);
+      else if (file && file.files && file.files[0]) {
+        var params = new URLSearchParams({ filename: file.files[0].name, title: title.value, doc_type: type.value });
+        if (date.value) params.set("effective_date", date.value);
+        request = apiRaw("POST", "/api/admin/kb/upload?" + params.toString(), file.files[0]);
+      } else request = api("POST", "/api/admin/kb/docs", body);
+      request
+        .then(function (d) { toast(existing ? "Đã lưu phiên bản " + d.version : "Đã thêm tài liệu " + d.doc_code); cur.kb = d.doc_code; loadKb(); showKb(d.doc_code); })
         .catch(function (e) { save.disabled = false; fail(e); });
     });
     title.focus();
   }
-  $("kbAdd").addEventListener("click", showKbForm);
+  $("kbAdd").addEventListener("click", function () { showKbForm(null); });
 
   setTab("queue");
 })();
