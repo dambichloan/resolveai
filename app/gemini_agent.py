@@ -377,7 +377,7 @@ class GeminiAgent:
                     return data, turn
                 # Tool use and constrained JSON output are separate requests. This final
                 # pass sees the full tool transcript and enforces the output contract.
-                final = self._request(contents + [model_content], model=model, tools=False, strict_json=True,
+                final = self._request(contents + [model_content, {"role": "user", "parts": [{"text": "Hãy trả lời cuối cùng theo đúng JSON schema đã yêu cầu."}]}], model=model, tools=False, strict_json=True,
                                       usage_counter=turn.usage)
                 final_text = final["candidates"][0]["content"]["parts"][0]["text"]
                 data = self._parse_json(final_text)
