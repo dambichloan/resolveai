@@ -34,8 +34,14 @@ from .ratelimit import SlidingWindowLimiter
 
 log = logging.getLogger("resolveai")
 
-CUSTOMER_ACTIONS = {"confirm_ticket", "reject_ticket"}
-ACTION_LABELS = {"confirm_ticket": "Xác nhận yêu cầu", "reject_ticket": "Chỉnh sửa yêu cầu"}
+CUSTOMER_ACTIONS = {"confirm_ticket", "reject_ticket", "request_handoff", "policy_return", "policy_warranty"}
+ACTION_LABELS = {
+    "confirm_ticket": "Xác nhận yêu cầu",
+    "reject_ticket": "Chỉnh sửa yêu cầu",
+    "request_handoff": "Gặp nhân viên",
+    "policy_return": "Chính sách đổi trả",
+    "policy_warranty": "Chính sách bảo hành",
+}
 TICKET_FLOW = ["Mới", "Đang xử lý", "Đã hoàn thành"]
 TICKET_CODE_RE = r"^TK-\d{8}-\d{4}$"  # BR5: TK-YYYYMMDD-XXXX
 TICKETS_NEED_ORDER = {"Đổi trả", "Bảo hành"}
