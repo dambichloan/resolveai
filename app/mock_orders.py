@@ -10,6 +10,7 @@ SEED_ORDERS = [
     ("SVN1003", "Áo khoác blazer nữ (Size S)", "Đã giao thành công", "18/11/2026 16:05", "7788", "thao@example.demo", "Đơn đã giao thành công; lỗi kỹ thuật có thể gửi yêu cầu bảo hành."),
     ("SVN1004", "Combo tất cổ cao Savani", "Đã giao thành công", "21/11/2026 10:20", "8877", "bao@example.demo", "Đơn đã giao thành công; tất/vớ không thuộc diện đổi trả theo chính sách."),
     ("SVN1005", "Áo thun nam cổ tròn (Size XL)", "Đang xử lý tại kho", "23/11/2026 08:40", "4455", "huy@example.demo", "Kho đang đóng gói; dự kiến bàn giao đơn vị vận chuyển trong hôm nay."),
+    ("SVN1008", "Áo sơ mi nam Oxford (Size L)", "Đã giao thành công", "15/11/2026 10:00", "1234", "tuan@example.demo", "Đơn đã giao thành công ngày 15/11/2026; nếu còn trong thời hạn và còn nguyên tem mác có thể tạo yêu cầu đổi trả."),
     ("SVN1006", "Áo polo nam basic (Size XL)", "Đã hủy", "23/11/2026 11:00", "1122", "minh@example.demo", "Đơn đã được hủy theo yêu cầu trước khi bàn giao đơn vị vận chuyển."),
 ]
 
@@ -33,7 +34,7 @@ class MockOrderStore:
                 updated_at TEXT NOT NULL, phone_last4 TEXT NOT NULL, email TEXT NOT NULL,
                 detail TEXT NOT NULL
             )""")
-            conn.executemany("INSERT OR IGNORE INTO mock_order VALUES (?,?,?,?,?,?,?)", SEED_ORDERS)
+            conn.executemany("INSERT OR REPLACE INTO mock_order VALUES (?,?,?,?,?,?,?)", SEED_ORDERS)
             conn.commit()
         finally:
             conn.close()

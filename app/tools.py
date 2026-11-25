@@ -58,6 +58,9 @@ class Turn:
     handoff: str | None = None                                # mã Handoff được đề nghị
     log: list[dict[str, Any]] = field(default_factory=list)   # (tên, kết quả ngắn) cho trace
     usage: dict[str, int] = field(default_factory=lambda: {"input_tokens": 0, "output_tokens": 0})
+    hint: str | None = None                                   # chỉ dẫn hệ thống thêm cho lượt này (fixed_rules)
+    force: str | None = None                                  # mã Handoff do Backend ép (HO-06)
+    fallback_text: str = ""                                   # câu trả lời cố định khi Gemini không soạn được
 
 
 def gemini_declarations() -> list[dict[str, Any]]:
