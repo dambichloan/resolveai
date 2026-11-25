@@ -6,9 +6,8 @@ Chatbot AI Agent chăm sóc khách hàng cho website thời trang Savani. Hệ t
 
 | Thành phần | Mô tả | Địa chỉ mặc định |
 |---|---|---|
-| Web chat | Giao diện khách hàng trò chuyện với chatbot | `http://localhost:8000/chat/` |
-| Trang quản trị | Giao diện cho nhân viên | `http://localhost:8000/admin/` |
-| Chatbot nhúng | Nút chat cho trang bán hàng | `http://localhost:8000/` |
+| Web chat | Giao diện khách hàng trò chuyện với chatbot | `https://resolveai-4ly7.onrender.com/` |
+| Trang quản trị | Giao diện cho nhân viên | `https://resolveai-4ly7.onrender.com/admin/` |
 
 ## Kiến trúc
 
@@ -102,15 +101,6 @@ python -m scripts.load_test --base-url http://localhost:8000 --requests 100 --co
 - Chroma chạy nhúng, lưu ở `DATA_DIR/chroma`; chỉ mục tự tạo lại khi tài liệu chính sách hoặc model embedding thay đổi.
 - Dữ liệu đơn hàng hiện là Mock Order DB, chưa có tích hợp với đơn hàng vận hành thật.
 - Chỉ dùng một worker, nên rate limit và khóa phiên nằm trong bộ nhớ.
-- Bảng size là thông tin phổ thông; Savani cần xác nhận số đo chính thức trước khi dùng cho tư vấn vận hành.
 - Langfuse là tùy chọn; đặt `LANGFUSE_PUBLIC_KEY` và `LANGFUSE_SECRET_KEY` để bật trace. Thiếu hoặc lỗi Langfuse không làm gián đoạn chat.
 
-## Nhúng chatbot
 
-Thêm dòng này trước `</body>` trên website khác:
-
-```html
-<script src="https://<máy-chủ-resolveai>/widget/widget.js" defer></script>
-```
-
-Widget dùng iframe `/chat/` của chính ResolveAI.
