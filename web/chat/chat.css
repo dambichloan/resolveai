@@ -12,7 +12,6 @@ header{display:flex;justify-content:space-between;align-items:center;padding:12p
 .msg.staff{background:#ecfdf5}
 .msg.system{align-self:center;background:none;color:#6b7280;font-size:13px;text-align:center}
 .who{display:block;font-size:11px;color:#6b7280;margin-bottom:2px}
-.src{display:block;margin-top:6px;font-size:12px;color:#6b7280}
 .card{margin-top:8px;padding:10px;border:1px solid #d1d5db;border-radius:8px;background:#fff}
 .card dl{margin:0 0 8px;display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:13px}
 .card dt{color:#6b7280}.card dd{margin:0}
@@ -26,7 +25,7 @@ header{display:flex;justify-content:space-between;align-items:center;padding:12p
 .composer input{flex:1;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font:inherit}
 .composer button{padding:10px 16px;border:0;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer}
 .composer button:disabled,.composer input:disabled{opacity:.5}
-.restart{margin:0 16px 12px;padding:10px;border-radius:8px;border:1px solid #2563eb;background:#fff;color:#2563eb;cursor:pointer}
+.finish,.restart{margin:0 16px 12px;padding:10px;border-radius:8px;border:1px solid #2563eb;background:#fff;color:#2563eb;cursor:pointer}
 
 .who-head{display:flex;align-items:center;gap:10px}
 .av{width:34px;height:34px;border-radius:50%;background:#c8102e;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700}
@@ -42,7 +41,7 @@ body.embed .privacy{font-size:11px}
 .msg.customer,.composer button,.card button{background:var(--brand)}
 .card button{border-color:var(--brand)}
 .card button.alt{background:#fff;color:var(--brand)}
-.restart{border-color:var(--brand);color:var(--brand)}
+.finish,.restart{border-color:var(--brand);color:var(--brand)}
 .composer input:focus{outline:2px solid var(--brand);outline-offset:0}
 .chips{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}
 .chips button{flex:none;white-space:nowrap}

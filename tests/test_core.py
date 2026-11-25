@@ -93,6 +93,18 @@ def test_idempotency(svc):
         assert c.execute("SELECT COUNT(*) FROM message WHERE role='customer' AND client_msg_id='c1'").fetchone()[0] == 1
 
 
+def test_customer_can_close_only_ai_handling_session(svc):
+    sid, tok, _ = start(svc)
+    assert svc.close_customer(sid, tok)["status"] == "Closed"
+    with pytest.raises(ApiError) as e:
+        say(svc, sid, tok, "còn đó không")
+    assert e.value.status == 409 and e.value.code == "session_closed"
+    handoff_sid, handoff_tok, _ = to_handoff(svc)
+    with pytest.raises(ApiError) as e:
+        svc.close_customer(handoff_sid, handoff_tok)
+    assert e.value.status == 409 and e.value.code == "session_not_closable"
+
+
 def test_validation(svc):
     for kw, code in [({"text": "  "}, "empty_message"), ({"text": "x" * 1001}, "message_too_long"),
                      ({"text": "a", "action": "hack"}, "invalid_action")]:
@@ -263,7 +275,8 @@ def test_admin_login_and_hash(svc):
 
 
 def test_dashboard(svc):
-    start(svc)
+    sid, tok, _ = start(svc)
+    svc.close_customer(sid, tok)
     to_handoff(svc)
     d = svc.dashboard()
     assert d["total_sessions"] == 2 and d["ai_self_resolved_rate"] == 0.5

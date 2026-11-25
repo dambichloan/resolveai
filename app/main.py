@@ -101,6 +101,10 @@ def create_app(settings: Settings | None = None, agent: AgentPort | None = None)
     def get_messages(session_id: str, after: int = 0, x_session_token: str | None = Header(default=None)):
         return svc.get_messages(session_id, x_session_token, after)
 
+    @app.post("/api/chat/sessions/{session_id}/close")
+    def close_customer_chat(session_id: str, x_session_token: str | None = Header(default=None)):
+        return svc.close_customer(session_id, x_session_token)
+
     # ---------------- nhân viên
     @app.post("/api/admin/login")
     def admin_login(body: LoginIn):

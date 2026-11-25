@@ -186,6 +186,24 @@ class ChatService:
                              (session_id, after)).fetchall()
         return {"session_id": session_id, "status": row["status"], "messages": [self._msg(r) for r in rows]}
 
+    def close_customer(self, session_id: str, token: str | None) -> dict:
+        """Let a customer close only an AI-resolved conversation.
+
+        A conversation waiting for or handled by staff remains staff-owned; a customer
+        must not be able to remove it from the support queue.
+        """
+        with self._lock_for(session_id):
+            with self.db.tx() as c:
+                row = self._auth_session(c, session_id, token)
+                if row["status"] == "Closed":
+                    return {"session_id": session_id, "status": "Closed"}
+                if row["status"] != "AI_Handling" or row["handoff_reason"]:
+                    raise ApiError(409, "session_not_closable",
+                                   "Chỉ có thể kết thúc cuộc trò chuyện khi trợ lý AI đang hỗ trợ.")
+                c.execute("UPDATE chat_session SET status='Closed', updated_at=? WHERE id=?",
+                          (_iso(self.now()), session_id))
+        return {"session_id": session_id, "status": "Closed"}
+
     # ---------------------------------------------------------------- một lượt
     def _process(self, session_id: str, new_token: str | None, text: str, client_msg_id: str | None,
                  action: str | None) -> dict:
@@ -558,7 +576,7 @@ class ChatService:
             total = c.execute("SELECT COUNT(*) FROM chat_session WHERE created_at>=? AND created_at<=?",
                               (lo, hi)).fetchone()[0]
             ai_only = c.execute("SELECT COUNT(*) FROM chat_session WHERE created_at>=? AND created_at<=?"
-                                " AND handoff_reason IS NULL", (lo, hi)).fetchone()[0]
+                                " AND status='Closed' AND handoff_reason IS NULL", (lo, hi)).fetchone()[0]
             intents = {(r["i"] or "Chưa phân loại"): r["n"] for r in c.execute(
                 "SELECT intent AS i, COUNT(*) AS n FROM chat_session WHERE created_at>=? AND created_at<=?"
                 " GROUP BY intent", (lo, hi))}
