@@ -46,8 +46,9 @@
   var form = el("form", "svc-form"), input = el("input"), sendBtn = el("button", null, "Gửi");
   input.type = "text"; input.maxLength = 1000; input.placeholder = "Nhập tin nhắn..."; input.setAttribute("aria-label", "Tin nhắn"); input.autocomplete = "off";
   sendBtn.type = "submit"; form.appendChild(input); form.appendChild(sendBtn);
+  var finish = el("button", "svc-finish", "Kết thúc cuộc trò chuyện"); finish.type = "button"; finish.hidden = true;
   var restart = el("button", "svc-restart", "Bắt đầu cuộc trò chuyện mới"); restart.type = "button"; restart.hidden = true;
-  [head, note, log, chips, banner, form, restart].forEach(function (n) { panel.appendChild(n); });
+  [head, note, log, chips, banner, form, finish, restart].forEach(function (n) { panel.appendChild(n); });
   root.appendChild(panel); root.appendChild(tip); root.appendChild(fab);
   CHIPS.forEach(function (c) { var b = el("button", null, c.text); b.type = "button"; b.addEventListener("click", function () { send(c.text, c.action); }); chips.appendChild(b); });
 
@@ -59,7 +60,6 @@
     var d = el("div", "svc-msg " + m.role);
     if (ROLE_NAME[m.role]) d.appendChild(el("span", "svc-who", ROLE_NAME[m.role]));
     d.appendChild(document.createTextNode(m.text));
-    if (m.sources && m.sources.length) d.appendChild(el("span", "svc-src", "Nguồn: " + m.sources.map(function (x) { return x.title + (x.section ? " - " + x.section : ""); }).join("; ")));
     if (m.ui && m.ui.type === "ticket_summary") d.appendChild(summaryCard(m));
     if (m.ui && m.ui.type === "ticket_created") d.appendChild(el("span", "svc-badge", "Mã yêu cầu: " + m.ui.code));
     if (m.ui && m.ui.type === "handoff_notice") d.appendChild(el("span", "svc-badge", "Đã chuyển cho nhân viên"));
@@ -81,7 +81,9 @@
   // ---------- trạng thái + gọi API
   function applyStatus(s) {
     statusEl.textContent = STATUS_TEXT[s] || s;
-    var closed = s === "Closed"; input.disabled = sendBtn.disabled = closed; restart.hidden = !closed;
+    var closed = s === "Closed"; input.disabled = sendBtn.disabled = closed;
+    restart.hidden = !closed;
+    finish.hidden = closed || s !== "AI_Handling" || !sid;
     if (s === "Waiting_Agent" || s === "Agent_Handling") startPoll(); else stopPoll();
   }
   function startPoll() { if (!poll) poll = setInterval(fetchNew, 3000); }
@@ -144,6 +146,18 @@
   tipX.addEventListener("click", function () { tip.hidden = true; });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !panel.hidden) close(); });
   form.addEventListener("submit", function (e) { e.preventDefault(); var t = input.value.trim(); if (!t) return; input.value = ""; send(t); });
+  finish.addEventListener("click", function () {
+    if (!sid || sending) return;
+    sending = true; showBanner("");
+    fetch(API + "/api/chat/sessions/" + encodeURIComponent(sid) + "/close", {
+      method: "POST", headers: { "X-Session-Token": token || "" }
+    }).then(function (res) { return res.json().catch(function () { return {}; }).then(function (body) { return { res: res, body: body }; }); })
+      .then(function (r) {
+        if (r.res.ok) { applyStatus(r.body.status); return; }
+        showBanner(errText(r.res, r.body));
+      }).catch(function () { showBanner(offlineText()); })
+      .then(function () { sending = false; });
+  });
   restart.addEventListener("click", function () { reset(false); });
 
   function boot() {
