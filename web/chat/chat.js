@@ -4,7 +4,7 @@
   var log = document.getElementById("log"), form = document.getElementById("form"),
       input = document.getElementById("input"), sendBtn = document.getElementById("send"),
       banner = document.getElementById("banner"), statusEl = document.getElementById("status"),
-      restart = document.getElementById("restart"), chips = document.getElementById("chips"),
+      restart = document.getElementById("restart"), finish = document.getElementById("finish"), chips = document.getElementById("chips"),
       closeBtn = document.getElementById("close");
   var QUICK = ["Tư vấn size", "Chính sách đổi trả", "Chính sách bảo hành", "Tra cứu đơn hàng", "Gặp nhân viên"];
   if (/[?&]embed=1/.test(location.search)) {
@@ -42,10 +42,6 @@
     var d = el("div", "msg " + m.role);
     if (ROLE_NAME[m.role]) d.appendChild(el("span", "who", ROLE_NAME[m.role]));
     d.appendChild(document.createTextNode(m.text));
-    if (m.sources && m.sources.length) {
-      var s = (m.sources.map(function (x) { return x.title + (x.section ? " - " + x.section : ""); })).join("; ");
-      d.appendChild(el("span", "src", "Nguồn: " + s));
-    }
     if (m.ui && m.ui.type === "ticket_summary") d.appendChild(summaryCard(m));
     if (m.ui && m.ui.type === "ticket_created") d.appendChild(el("span", "badge", "Mã yêu cầu: " + m.ui.code));
     if (m.ui && m.ui.type === "handoff_notice") d.appendChild(el("span", "badge", "Đã chuyển cho nhân viên"));
@@ -69,7 +65,9 @@
   function applyStatus(s) {
     status = s; statusEl.textContent = STATUS_TEXT[s] || s;
     var closed = s === "Closed";
-    input.disabled = sendBtn.disabled = closed; restart.hidden = !closed;
+    input.disabled = sendBtn.disabled = closed;
+    restart.hidden = !closed;
+    finish.hidden = closed || s !== "AI_Handling" || !sid;
     if (s === "Waiting_Agent" || s === "Agent_Handling") startPoll(); else stopPoll();
   }
   function startPoll() { if (!poll) poll = setInterval(fetchNew, 3000); }
@@ -129,6 +127,19 @@
   form.addEventListener("submit", function (e) {
     e.preventDefault(); var t = input.value.trim(); if (!t) return;
     input.value = ""; send(t, null);
+  });
+  finish.addEventListener("click", function () {
+    if (!sid || sending) return;
+    sending = true; showBanner("");
+    fetch("/api/chat/sessions/" + encodeURIComponent(sid) + "/close", {
+      method: "POST", headers: { "X-Session-Token": token || "" }
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (body) { return { res: res, body: body }; });
+    }).then(function (r) {
+      if (r.res.ok) { applyStatus(r.body.status); return; }
+      showBanner(errorMessage(r.res, r.body));
+    }).catch(function () { showBanner("Không kết nối được máy chủ. Vui lòng thử lại sau ít phút."); })
+      .then(function () { sending = false; });
   });
   restart.addEventListener("click", function () { reset(false); });
 
